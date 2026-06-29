@@ -73,6 +73,7 @@ static int bootguard_status(int fd)
   struct watchdog_status_s status;
   uint32_t scratch0 = 0;
   uint32_t scratch1 = 0;
+  uint32_t scratch2 = 0;
   int ret;
 
   ret = bootguard_getscratch(fd, &scratch0);
@@ -88,6 +89,13 @@ static int bootguard_status(int fd)
       return EXIT_FAILURE;
     }
 
+  ret = ioctl(fd, WDIOC_GET_SCRATCH2, (unsigned long)((uintptr_t)&scratch2));
+  if (ret < 0)
+    {
+      fprintf(stderr, "ERROR: WDIOC_GET_SCRATCH2 failed: %d\n", errno);
+      return EXIT_FAILURE;
+    }
+
   ret = ioctl(fd, WDIOC_GETSTATUS, (unsigned long)((uintptr_t)&status));
   if (ret < 0)
     {
@@ -99,6 +107,7 @@ static int bootguard_status(int fd)
          scratch0 == BOOTGUARD_MAGIC ? "armed" : "disarmed");
   printf("scratch0: 0x%08" PRIx32 "\n", scratch0);
   printf("timeout-ms: %" PRIu32 "\n", scratch1);
+  printf("diag: 0x%08" PRIx32 "\n", scratch2);
   printf("watchdog-flags: 0x%08" PRIx32 "\n", status.flags);
   printf("watchdog-timeout-ms: %" PRIu32 "\n", status.timeout);
   printf("watchdog-timeleft-ms: %" PRIu32 "\n", status.timeleft);
@@ -121,6 +130,13 @@ static int bootguard_off(int fd)
   if (ret < 0)
     {
       fprintf(stderr, "ERROR: WDIOC_SET_SCRATCH1 failed: %d\n", errno);
+      return EXIT_FAILURE;
+    }
+
+  ret = ioctl(fd, WDIOC_SET_SCRATCH2, 0);
+  if (ret < 0)
+    {
+      fprintf(stderr, "ERROR: WDIOC_SET_SCRATCH2 failed: %d\n", errno);
       return EXIT_FAILURE;
     }
 
@@ -161,6 +177,13 @@ static int bootguard_on(int fd, int argc, FAR char *argv[])
   if (ret < 0)
     {
       fprintf(stderr, "ERROR: WDIOC_SET_SCRATCH1 failed: %d\n", errno);
+      return EXIT_FAILURE;
+    }
+
+  ret = ioctl(fd, WDIOC_SET_SCRATCH2, 0);
+  if (ret < 0)
+    {
+      fprintf(stderr, "ERROR: WDIOC_SET_SCRATCH2 failed: %d\n", errno);
       return EXIT_FAILURE;
     }
 
