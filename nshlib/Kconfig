@@ -1001,6 +1001,48 @@ config USBDEV_MINOR
 		If there are more than one USB devices, then a USB device
 		minor number may also need to be provided. Default: 0
 
+config NSH_USBCONSOLE_WAIT_INPUT
+	bool "Wait for ENTER before starting USB console"
+	default y
+	---help---
+		If defined, NSH waits until it reads three newline characters from
+		the USB serial console before starting the interactive session. This
+		preserves the traditional behavior where the user presses ENTER a
+		few times after opening the host terminal.
+
+		If disabled, NSH starts the session as soon as the USB serial device
+		can be opened. This is useful for CDC ACM consoles where host
+		open/close sequencing can otherwise leave the board waiting even
+		though the USB device is already enumerated.
+
+config NSH_USBCONSOLE_CONNECT_DELAY
+	int "USB console connect delay in milliseconds"
+	default 0
+	depends on !NSH_USBCONSOLE_WAIT_INPUT
+	---help---
+		If non-zero, NSH waits this many milliseconds after the USB serial
+		device opens before starting the interactive session. This gives the
+		host terminal time to finish configuring termios and modem-control
+		lines before NSH prints the first prompt and blocks in readline.
+
+config NSH_USBCONSOLE_WAIT_DTR
+	bool "Wait for USB CDC DTR before starting console"
+	default n
+	depends on !NSH_USBCONSOLE_WAIT_INPUT && CDCACM
+	---help---
+		If enabled, NSH waits for the host to assert CDC DTR before starting
+		the interactive session. This avoids losing the first prompt or
+		starting readline while the host terminal is still configuring the
+		USB CDC port.
+
+config NSH_USBCONSOLE_WAIT_DTR_TIMEOUT
+	int "USB CDC DTR wait timeout in milliseconds"
+	default 5000
+	depends on NSH_USBCONSOLE_WAIT_DTR
+	---help---
+		Maximum time to wait for DTR before starting the console anyway.
+		Use 0 to wait indefinitely.
+
 endif # NSH_USBCONSOLE
 
 config NSH_ALTCONDEV

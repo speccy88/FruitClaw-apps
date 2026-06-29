@@ -27,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <sys/boardctl.h>
+#include <sys/ioctl.h>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -34,7 +35,12 @@
 #include <assert.h>
 #include <nuttx/debug.h>
 
+#ifdef CONFIG_SERIAL_TERMIOS
+#  include <termios.h>
+#endif
+
 #ifdef CONFIG_CDCACM
+#  include <nuttx/usb/cdc.h>
 #  include <nuttx/usb/cdcacm.h>
 #endif
 
@@ -48,6 +54,12 @@
 #include "netutils/netinit.h"
 
 #ifdef HAVE_USB_CONSOLE
+
+/****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+static int g_usbstdiofd = -1;
 
 /****************************************************************************
  * Private Functions
@@ -69,6 +81,114 @@ static void nsh_configstdio(int fd)
   dup2(fd, 1);
   dup2(fd, 2);
 }
+
+/****************************************************************************
+ * Name: nsh_closeusbstdio
+ ****************************************************************************/
+
+static void nsh_closeusbstdio(FAR struct console_stdio_s *pstate)
+{
+  if (g_usbstdiofd >= 0)
+    {
+      close(g_usbstdiofd);
+      g_usbstdiofd = -1;
+    }
+
+  INFD(pstate)  = STDIN_FILENO;
+  OUTFD(pstate) = STDOUT_FILENO;
+  ERRFD(pstate) = STDERR_FILENO;
+}
+
+/****************************************************************************
+ * Name: nsh_configusbtermios
+ ****************************************************************************/
+
+#ifdef CONFIG_SERIAL_TERMIOS
+static void nsh_configusbtermios(int fd)
+{
+  struct termios cfg;
+
+  if (tcgetattr(fd, &cfg) == 0)
+    {
+      cfg.c_iflag = 0;
+      cfg.c_oflag = OPOST | ONLCR;
+      cfg.c_lflag = ISIG;
+      cfg.c_cc[VMIN] = 1;
+      cfg.c_cc[VTIME] = 0;
+
+      tcsetattr(fd, TCSANOW, &cfg);
+    }
+}
+#endif
+
+/****************************************************************************
+ * Name: nsh_configusbstdio
+ *
+ * Description:
+ *   Configure standard I/O and the NSH front-end to use the live USB
+ *   descriptor.
+ *
+ ****************************************************************************/
+
+static void nsh_configusbstdio(FAR struct console_stdio_s *pstate, int fd)
+{
+  if (g_usbstdiofd >= 0 && g_usbstdiofd != fd)
+    {
+      close(g_usbstdiofd);
+    }
+
+  g_usbstdiofd = fd;
+
+  nsh_configstdio(fd);
+
+#ifdef CONFIG_SERIAL_TERMIOS
+  nsh_configusbtermios(fd);
+#endif
+
+  INFD(pstate)  = fd;
+  OUTFD(pstate) = fd;
+  ERRFD(pstate) = fd;
+}
+
+/****************************************************************************
+ * Name: nsh_waitusbdtr
+ *
+ * Description:
+ *   Wait until the CDC ACM host asserts DTR.
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_NSH_USBCONSOLE_WAIT_DTR
+static void nsh_waitusbdtr(int fd)
+{
+  int elapsed = 0;
+  int ctrlline;
+
+  for (; ; )
+    {
+      ctrlline = 0;
+      if (ioctl(fd, CAIOC_GETCTRLLINE, (unsigned long)&ctrlline) < 0)
+        {
+          return;
+        }
+
+      if ((ctrlline & CDCACM_UART_DTR) != 0)
+        {
+          return;
+        }
+
+#if CONFIG_NSH_USBCONSOLE_WAIT_DTR_TIMEOUT > 0
+      if (elapsed >= CONFIG_NSH_USBCONSOLE_WAIT_DTR_TIMEOUT)
+        {
+          return;
+        }
+#endif
+
+      usleep(10000);
+      elapsed += 10;
+    }
+}
+#endif
 
 /****************************************************************************
  * Name: nsh_nullstdio
@@ -116,9 +236,11 @@ static int nsh_nullstdio(void)
 
 static int nsh_waitusbready(FAR struct console_stdio_s *pstate)
 {
+#ifdef CONFIG_NSH_USBCONSOLE_WAIT_INPUT
   char inch;
   ssize_t nbytes;
   int nlc;
+#endif
   int fd;
 
   /* Don't start the NSH console until the console device is ready.  Chances
@@ -127,7 +249,9 @@ static int nsh_waitusbready(FAR struct console_stdio_s *pstate)
    * host-side application opens the connection.
    */
 
+#ifdef CONFIG_NSH_USBCONSOLE_WAIT_INPUT
 restart:
+#endif
 
   /* Open the USB serial device for read/write access */
 
@@ -151,6 +275,24 @@ restart:
     }
   while (fd < 0);
 
+#ifndef CONFIG_NSH_USBCONSOLE_WAIT_INPUT
+  /* The USB serial device is configured.  Start the session immediately and
+   * let the command-line reader block until the host sends input.
+   */
+
+#ifdef CONFIG_NSH_USBCONSOLE_WAIT_DTR
+  nsh_waitusbdtr(fd);
+#endif
+
+#if defined(CONFIG_NSH_USBCONSOLE_CONNECT_DELAY) && \
+    CONFIG_NSH_USBCONSOLE_CONNECT_DELAY > 0
+  usleep(CONFIG_NSH_USBCONSOLE_CONNECT_DELAY * 1000);
+#endif
+
+  nsh_configusbstdio(pstate, fd);
+
+  return OK;
+#else
   /* Now wait until we successfully read a carriage return a few times.
    * That is a sure way of know that there is something at the other end of
    * the USB serial connection that is ready to talk with us.  The user needs
@@ -195,16 +337,10 @@ restart:
 
   /* Configure standard I/O */
 
-  nsh_configstdio(fd);
-
-  /* We can close the original file descriptor (unless it was one of 0-2) */
-
-  if (fd > 2)
-    {
-      close(fd);
-    }
+  nsh_configusbstdio(pstate, fd);
 
   return OK;
+#endif
 }
 
 /****************************************************************************
@@ -310,6 +446,7 @@ int nsh_consolemain(int argc, FAR char *argv[])
        */
 
       nsh_nullstdio();
+      nsh_closeusbstdio(pstate);
     }
 }
 
