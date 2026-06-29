@@ -26,6 +26,7 @@
 
 #include <nuttx/config.h>
 #include <nuttx/irq.h>
+#include <nuttx/kmalloc.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -90,6 +91,7 @@ struct ramspeed_s
   uint32_t repeat_num;
   bool irq_disable;
   bool allocate_rw_address;
+  bool allocate_kmem_address;
 };
 
 /****************************************************************************
@@ -111,6 +113,9 @@ static void show_usage(FAR const char *progname, int exitcode)
          progname);
   printf("\nWhere:\n");
   printf("  -a allocate RW buffers on heap. Overwrites -r and -w option.\n");
+#ifdef CONFIG_MM_KERNEL_HEAP
+  printf("  -k allocate RW buffers on kernel heap. Overwrites -r, -w, and -a option.\n");
+#endif
   printf("  -r <hex-address> read address.\n");
   printf("  -w <hex-address> write address.\n");
   printf("  -s <decimal-size> number of memory locations (in bytes).\n");
@@ -143,12 +148,22 @@ static void parse_commandline(int argc, FAR char **argv,
       show_usage(argv[0], EXIT_FAILURE);
     }
 
-  while ((ch = getopt(argc, argv, "r:w:s:v:n:ia")) != ERROR)
+  while ((ch = getopt(argc, argv, "r:w:s:v:n:iak")) != ERROR)
     {
       switch (ch)
         {
           case 'a':
             info->allocate_rw_address = true;
+            info->allocate_kmem_address = false;
+            break;
+          case 'k':
+#ifdef CONFIG_MM_KERNEL_HEAP
+            info->allocate_kmem_address = true;
+            info->allocate_rw_address = false;
+#else
+            printf(RAMSPEED_PREFIX "-k requires CONFIG_MM_KERNEL_HEAP\n");
+            exit(EXIT_FAILURE);
+#endif
             break;
           case 'r':
             OPTARG_TO_VALUE(info->src, const void *, 16);
@@ -202,7 +217,8 @@ static void parse_commandline(int argc, FAR char **argv,
         }
     }
 
-  if (!info->allocate_rw_address && info->dest == NULL)
+  if (!info->allocate_rw_address && !info->allocate_kmem_address &&
+      info->dest == NULL)
     {
       /* We allow only set write address to test memset only.
        * But if need test read by specific address, need write address also.
@@ -211,7 +227,7 @@ static void parse_commandline(int argc, FAR char **argv,
       printf(RAMSPEED_PREFIX "Required Address Failed\n");
       goto out;
     }
-  else if (info->allocate_rw_address)
+  else if (info->allocate_rw_address || info->allocate_kmem_address)
     {
       if (info->size == 0)
         {
@@ -221,17 +237,49 @@ static void parse_commandline(int argc, FAR char **argv,
 
       /* We need to automatically apply for memory */
 
-      printf(RAMSPEED_PREFIX "Allocate RW buffers on heap\n");
-      info->dest = malloc(info->size);
+#ifdef CONFIG_MM_KERNEL_HEAP
+      if (info->allocate_kmem_address)
+        {
+          printf(RAMSPEED_PREFIX "Allocate RW buffers on kernel heap\n");
+          info->dest = kmm_malloc(info->size);
+        }
+      else
+#endif
+        {
+          printf(RAMSPEED_PREFIX "Allocate RW buffers on user heap\n");
+          info->dest = malloc(info->size);
+        }
+
       if (info->dest == NULL)
         {
           printf(RAMSPEED_PREFIX "Dest Alloc Memory Failed!\n");
           goto out;
         }
 
-      info->src = malloc(info->size);
+#ifdef CONFIG_MM_KERNEL_HEAP
+      if (info->allocate_kmem_address)
+        {
+          info->src = kmm_malloc(info->size);
+        }
+      else
+#endif
+        {
+          info->src = malloc(info->size);
+        }
+
       if (info->src == NULL)
         {
+#ifdef CONFIG_MM_KERNEL_HEAP
+          if (info->allocate_kmem_address)
+            {
+              kmm_free(info->dest);
+            }
+          else
+#endif
+            {
+              free(info->dest);
+            }
+
           printf(RAMSPEED_PREFIX "Src Alloc Memory Failed!\n");
           goto out;
         }
@@ -591,10 +639,20 @@ int main(int argc, FAR char *argv[])
 
   /* Check if alloc from heap? */
 
-  if (ramspeed.allocate_rw_address)
+  if (ramspeed.allocate_rw_address || ramspeed.allocate_kmem_address)
     {
-      free(ramspeed.dest);
-      free((void *)ramspeed.src);
+#ifdef CONFIG_MM_KERNEL_HEAP
+      if (ramspeed.allocate_kmem_address)
+        {
+          kmm_free(ramspeed.dest);
+          kmm_free((void *)ramspeed.src);
+        }
+      else
+#endif
+        {
+          free(ramspeed.dest);
+          free((void *)ramspeed.src);
+        }
     }
 
   return EXIT_SUCCESS;

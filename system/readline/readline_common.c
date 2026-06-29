@@ -95,6 +95,13 @@ static FAR const struct extmatch_vtable_s *g_extmatch_vtbl = NULL;
 static struct cmdhist_s g_cmdhist;
 #endif /* CONFIG_READLINE_CMD_HISTORY */
 
+/* Some terminals send CRLF for the enter key.  readline_common() returns as
+ * soon as it sees the CR, so the following LF must be consumed on the next
+ * call instead of being treated as a second empty command.
+ */
+
+static bool g_skip_lf_after_cr;
+
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
@@ -634,9 +641,18 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
           return EOF;
         }
 
+      if (g_skip_lf_after_cr)
+        {
+          g_skip_lf_after_cr = false;
+          if (ch == '\n')
+            {
+              continue;
+            }
+        }
+
       /* Are we processing a VT100 escape sequence */
 
-      else if (escape)
+      if (escape)
         {
           /* Yes.  Track CSI arrow/editing sequences. */
 
@@ -875,6 +891,8 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
 
       else if (ch == '\n' || ch == '\r')
         {
+          g_skip_lf_after_cr = (ch == '\r');
+
 #ifdef CONFIG_READLINE_CMD_HISTORY
           /* Save history of command, only if there was something
            * typed besides return character.
@@ -906,6 +924,14 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
               g_cmdhist.offset = 1;
             }
 #endif /* CONFIG_READLINE_CMD_HISTORY */
+
+#ifdef CONFIG_READLINE_ECHO
+          /* The serial console may not locally echo the enter key.  Echo a
+           * line feed here so the next prompt starts on a fresh line.
+           */
+
+          RL_PUTC(vtbl, '\n');
+#endif
 
           /* The newline is stored in the buffer along with the null
            * terminator.

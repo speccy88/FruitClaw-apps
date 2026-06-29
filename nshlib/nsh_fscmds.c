@@ -1914,19 +1914,49 @@ int cmd_mkfatfs(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
   bool badarg;
   int option;
   int rootdirentries;
+  int clustshift;
+  int nfats;
   int ret = ERROR;
 
-  /* mkfatfs [-F <fatsize>] <block-driver> */
+  /* mkfatfs [-F <fatsize>] [-c <clustershift>] [-n <nfats>]
+   *         <block-driver>
+   */
 
   badarg = false;
-  while ((option = getopt(argc, argv, ":F:r:")) != ERROR)
+  while ((option = getopt(argc, argv, ":F:c:n:r:")) != ERROR)
     {
       switch (option)
         {
+          case 'c':
+            clustshift = atoi(optarg);
+            if (clustshift >= 0 && clustshift <= 7)
+              {
+                fmt.ff_clustshift = clustshift;
+              }
+            else
+              {
+                nsh_error(vtbl, g_fmtargrange, argv[0]);
+                badarg = true;
+              }
+            break;
+
           case 'F':
             fmt.ff_fattype = atoi(optarg);
             if (fmt.ff_fattype != 0  && fmt.ff_fattype != 12 &&
                 fmt.ff_fattype != 16 && fmt.ff_fattype != 32)
+              {
+                nsh_error(vtbl, g_fmtargrange, argv[0]);
+                badarg = true;
+              }
+            break;
+
+         case 'n':
+            nfats = atoi(optarg);
+            if (nfats >= 1 && nfats <= 4)
+              {
+                fmt.ff_nfats = nfats;
+              }
+            else
               {
                 nsh_error(vtbl, g_fmtargrange, argv[0]);
                 badarg = true;
