@@ -71,6 +71,8 @@ struct cmdhist_s
 
 #ifdef CONFIG_READLINE_ECHO
 static const char g_erasetoeol[] = VT100_CLEAREOL;
+static const char g_cursorleft[] = VT100_CURSORLF('1');
+static const char g_cursorright[] = VT100_CURSORRT('1');
 #endif
 
 #ifdef CONFIG_READLINE_TABCOMPLETION
@@ -90,6 +92,66 @@ static struct cmdhist_s g_cmdhist;
 /****************************************************************************
  * Private Functions
  ****************************************************************************/
+
+/****************************************************************************
+ * Name: move_cursor_left
+ ****************************************************************************/
+
+#ifdef CONFIG_READLINE_ECHO
+static void move_cursor_left(FAR struct rl_common_s *vtbl, int count)
+{
+  while (count-- > 0)
+    {
+      RL_WRITE(vtbl, g_cursorleft, sizeof(g_cursorleft));
+    }
+}
+#endif
+
+/****************************************************************************
+ * Name: move_cursor_right
+ ****************************************************************************/
+
+#ifdef CONFIG_READLINE_ECHO
+static void move_cursor_right(FAR struct rl_common_s *vtbl, int count)
+{
+  while (count-- > 0)
+    {
+      RL_WRITE(vtbl, g_cursorright, sizeof(g_cursorright));
+    }
+}
+#endif
+
+/****************************************************************************
+ * Name: redraw_from_cursor
+ ****************************************************************************/
+
+#ifdef CONFIG_READLINE_ECHO
+static void redraw_from_cursor(FAR struct rl_common_s *vtbl,
+                               FAR const char *buf, int nch, int cursor)
+{
+  int tail = nch - cursor;
+
+  if (tail > 0)
+    {
+      RL_WRITE(vtbl, &buf[cursor], tail);
+    }
+
+  RL_WRITE(vtbl, g_erasetoeol, sizeof(g_erasetoeol));
+  move_cursor_left(vtbl, tail);
+}
+#endif
+
+/****************************************************************************
+ * Name: clear_input_line
+ ****************************************************************************/
+
+#ifdef CONFIG_READLINE_ECHO
+static void clear_input_line(FAR struct rl_common_s *vtbl, int cursor)
+{
+  move_cursor_left(vtbl, cursor);
+  RL_WRITE(vtbl, g_erasetoeol, sizeof(g_erasetoeol));
+}
+#endif
 
 /****************************************************************************
  * Name: count_builtin_matches
@@ -477,6 +539,7 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
                         int buflen)
 {
   int escape;
+  int cursor;
   int nch;
 #ifdef CONFIG_READLINE_CMD_HISTORY
   int i;
@@ -504,6 +567,7 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
    */
 
   escape = 0;
+  cursor = 0;
   nch    = 0;
 
   for (; ; )
@@ -538,91 +602,186 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
 
       else if (escape)
         {
-          /* Yes, is it an <esc>[, 3 byte sequence */
+          /* Yes.  Track CSI arrow/editing sequences. */
 
-          if (ch != ASCII_LBRACKET || escape == 2)
+          if (escape == 1)
             {
-              /* We are finished with the escape sequence */
-
-#ifdef CONFIG_READLINE_CMD_HISTORY
-              /* Intercept up and down arrow keys */
-
-              if (g_cmdhist.len > 0)
+              if (ch == ASCII_LBRACKET)
                 {
-                  if (ch == 'A') /* up arrow */
-                    {
-                      /* Go to the past command in history */
-
-                      g_cmdhist.offset--;
-
-                      if (-g_cmdhist.offset >= g_cmdhist.len)
-                        {
-                          g_cmdhist.offset = -(g_cmdhist.len - 1);
-                        }
-                    }
-                  else if (ch == 'B') /* down arrow */
-                    {
-                      /* Go to the recent command in history */
-
-                      g_cmdhist.offset++;
-
-                      if (g_cmdhist.offset > 1)
-                        {
-                          g_cmdhist.offset = 1;
-                        }
-                    }
-
-                  /* Clear out current command from the prompt */
-
-                  while (nch > 0)
-                    {
-                      nch--;
-
-#ifdef CONFIG_READLINE_ECHO
-                      RL_PUTC(vtbl, ASCII_BS);
-                      RL_WRITE(vtbl, g_erasetoeol, sizeof(g_erasetoeol));
-#endif
-                    }
-
-                  if (g_cmdhist.offset != 1)
-                    {
-                      int idx = g_cmdhist.head + g_cmdhist.offset;
-
-                      /* Circular buffer wrap around */
-
-                      if (idx < 0)
-                        {
-                          idx = idx + RL_CMDHIST_LEN;
-                        }
-                      else if (idx >= RL_CMDHIST_LEN)
-                        {
-                          idx = idx - RL_CMDHIST_LEN;
-                        }
-
-                      for (i = 0; g_cmdhist.buf[idx][i] != '\0'; i++)
-                        {
-                          buf[nch++] = g_cmdhist.buf[idx][i];
-                          RL_PUTC(vtbl, g_cmdhist.buf[idx][i]);
-                        }
-
-                      buf[nch] = '\0';
-                    }
+                  escape = 2;
                 }
-#endif /* CONFIG_READLINE_CMD_HISTORY */
+              else
+                {
+                  escape = 0;
+                }
+
+              continue;
+            }
+
+          if (escape == 2 && ch >= ASCII_0 && ch <= ASCII_9)
+            {
+              escape = ch;
+              continue;
+            }
+
+          if (escape >= ASCII_0 && escape <= ASCII_9)
+            {
+              int parameter = escape;
 
               escape = 0;
-              ch = 'a';
-            }
-          else
-            {
-              /* The next character is the end of a 3-byte sequence.
-               * NOTE:  Some of the <esc>[ sequences are longer than
-               * 3-bytes, but I have not encountered any in normal use
-               * yet and, so, have not provided the decoding logic.
-               */
+              if (ch == '~')
+                {
+                  switch (parameter)
+                    {
+                      case ASCII_1:
+                      case ASCII_7:
+#ifdef CONFIG_READLINE_ECHO
+                        move_cursor_left(vtbl, cursor);
+#endif
+                        cursor = 0;
+                        break;
 
-              escape = 2;
+                      case ASCII_3:
+                        if (cursor < nch)
+                          {
+                            int tail = nch - cursor - 1;
+
+                            if (tail > 0)
+                              {
+                                memmove(&buf[cursor], &buf[cursor + 1],
+                                        tail);
+                              }
+
+                            nch--;
+                            buf[nch] = '\0';
+
+#ifdef CONFIG_READLINE_ECHO
+                            redraw_from_cursor(vtbl, buf, nch, cursor);
+#endif
+                          }
+                        break;
+
+                      case ASCII_4:
+                      case ASCII_8:
+#ifdef CONFIG_READLINE_ECHO
+                        move_cursor_right(vtbl, nch - cursor);
+#endif
+                        cursor = nch;
+                        break;
+                    }
+                }
+
+              continue;
             }
+
+#ifdef CONFIG_READLINE_CMD_HISTORY
+          /* Intercept up and down arrow keys */
+
+          if ((ch == 'A' || ch == 'B') && g_cmdhist.len > 0)
+            {
+              if (ch == 'A') /* up arrow */
+                {
+                  /* Go to the past command in history */
+
+                  g_cmdhist.offset--;
+
+                  if (-g_cmdhist.offset >= g_cmdhist.len)
+                    {
+                      g_cmdhist.offset = -(g_cmdhist.len - 1);
+                    }
+                }
+              else /* down arrow */
+                {
+                  /* Go to the recent command */
+
+                  g_cmdhist.offset++;
+
+                  if (g_cmdhist.offset > 1)
+                    {
+                      g_cmdhist.offset = 1;
+                    }
+                }
+
+#ifdef CONFIG_READLINE_ECHO
+              clear_input_line(vtbl, cursor);
+#endif
+              nch    = 0;
+              cursor = 0;
+
+              if (g_cmdhist.offset != 1)
+                {
+                  int idx = g_cmdhist.head + g_cmdhist.offset;
+
+                  /* Circular buffer wrap around */
+
+                  if (idx < 0)
+                    {
+                      idx = idx + RL_CMDHIST_LEN;
+                    }
+                  else if (idx >= RL_CMDHIST_LEN)
+                    {
+                      idx = idx - RL_CMDHIST_LEN;
+                    }
+
+                  for (i = 0; g_cmdhist.buf[idx][i] != '\0'; i++)
+                    {
+                      if (nch + 1 >= buflen)
+                        {
+                          break;
+                        }
+
+                      buf[nch++] = g_cmdhist.buf[idx][i];
+                    }
+
+                  cursor = nch;
+#ifdef CONFIG_READLINE_ECHO
+                  RL_WRITE(vtbl, buf, nch);
+#endif
+                }
+
+              buf[nch] = '\0';
+              escape = 0;
+              continue;
+            }
+#endif /* CONFIG_READLINE_CMD_HISTORY */
+
+          if (ch == 'C') /* right arrow */
+            {
+              if (cursor < nch)
+                {
+#ifdef CONFIG_READLINE_ECHO
+                  move_cursor_right(vtbl, 1);
+#endif
+                  cursor++;
+                }
+            }
+          else if (ch == 'D') /* left arrow */
+            {
+              if (cursor > 0)
+                {
+#ifdef CONFIG_READLINE_ECHO
+                  move_cursor_left(vtbl, 1);
+#endif
+                  cursor--;
+                }
+            }
+          else if (ch == 'H') /* home */
+            {
+#ifdef CONFIG_READLINE_ECHO
+              move_cursor_left(vtbl, cursor);
+#endif
+              cursor = 0;
+            }
+          else if (ch == 'F') /* end */
+            {
+#ifdef CONFIG_READLINE_ECHO
+              move_cursor_right(vtbl, nch - cursor);
+#endif
+              cursor = nch;
+            }
+
+          escape = 0;
+          continue;
         }
 
       /* Check for backspace
@@ -636,11 +795,21 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
 
       else if (ch == ASCII_BS || ch == ASCII_DEL)
         {
-          /* Eliminate that last character in the buffer. */
+          /* Eliminate the character to the left of the cursor. */
 
-          if (nch > 0)
+          if (cursor > 0)
             {
+              int tail;
+
+              cursor--;
+              tail = nch - cursor - 1;
+              if (tail > 0)
+                {
+                  memmove(&buf[cursor], &buf[cursor + 1], tail);
+                }
+
               nch--;
+              buf[nch] = '\0';
 
 #ifdef CONFIG_READLINE_ECHO
               /* Echo the backspace character on the console.  Always output
@@ -649,7 +818,7 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
                */
 
               RL_PUTC(vtbl, ASCII_BS);
-              RL_WRITE(vtbl, g_erasetoeol, sizeof(g_erasetoeol));
+              redraw_from_cursor(vtbl, buf, nch, cursor);
 #endif
             }
         }
@@ -668,7 +837,7 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
        * others both.
        */
 
-      else if (ch == '\n')
+      else if (ch == '\n' || ch == '\r')
         {
 #ifdef CONFIG_READLINE_CMD_HISTORY
           /* Save history of command, only if there was something
@@ -718,8 +887,6 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
 
       else if (!iscntrl(ch & 0xff))
         {
-          buf[nch++] = ch;
-
           /* Check if there is room for another character and the line's
            * null terminator.  If not then we have to end the line now.
            */
@@ -729,11 +896,39 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
               buf[nch] = '\0';
               return nch;
             }
+
+          if (cursor < nch)
+            {
+              memmove(&buf[cursor + 1], &buf[cursor], nch - cursor);
+              buf[cursor] = ch;
+              nch++;
+              cursor++;
+              buf[nch] = '\0';
+
+#ifdef CONFIG_READLINE_ECHO
+              RL_PUTC(vtbl, ch);
+              redraw_from_cursor(vtbl, buf, nch, cursor);
+#endif
+            }
+          else
+            {
+              buf[nch++] = ch;
+              cursor = nch;
+              buf[nch] = '\0';
+
+#ifdef CONFIG_READLINE_ECHO
+              RL_PUTC(vtbl, ch);
+#endif
+            }
         }
 #ifdef CONFIG_READLINE_TABCOMPLETION
       else if (ch == '\t') /* TAB character */
         {
-          tab_completion(vtbl, buf, buflen, &nch);
+          if (cursor == nch)
+            {
+              tab_completion(vtbl, buf, buflen, &nch);
+              cursor = nch;
+            }
         }
 #endif
     }
