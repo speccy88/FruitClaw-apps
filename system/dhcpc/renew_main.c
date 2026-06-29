@@ -28,6 +28,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
 
 #include <net/if.h>
 
@@ -70,7 +71,8 @@ int main(int argc, FAR char *argv[])
   ret = netlib_obtain_ipv4addr(argv[1]);
   if (ret < 0)
     {
-      fprintf(stderr, "ERROR: netlib_obtain_ipv4addr() failed\n");
+      fprintf(stderr, "ERROR: netlib_obtain_ipv4addr(%s) failed: "
+              "ret=%d errno=%d\n", argv[1], ret, errno);
       return EXIT_FAILURE;
     }
 

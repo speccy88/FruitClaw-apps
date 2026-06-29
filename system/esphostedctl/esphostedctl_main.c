@@ -89,6 +89,9 @@ int main(int argc, FAR char *argv[])
   esphostedctl_print_counter("unknown", stats.rx_unknown_count);
 
   esphostedctl_print_section("rpc");
+  esphostedctl_print_counter("tlv_tx", stats.rpc_tlv_tx_count);
+  esphostedctl_print_counter("tlv_rx", stats.rpc_tlv_rx_count);
+  esphostedctl_print_counter("tlv_error", stats.rpc_tlv_error_count);
   esphostedctl_print_counter("request", stats.rpc_request_count);
   esphostedctl_print_counter("response", stats.rpc_response_count);
   esphostedctl_print_counter("event", stats.rpc_event_count);

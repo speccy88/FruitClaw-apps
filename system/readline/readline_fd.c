@@ -107,16 +107,64 @@ static int readline_getc(FAR struct rl_common_s *vtbl)
   return (int)buffer;
 }
 
+#ifdef CONFIG_READLINE_ECHO
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+#define READLINE_WRITE_RETRY_USEC 1000
+#define READLINE_WRITE_MAX_STALLS 200
+
+/****************************************************************************
+ * Name: readline_write_all
+ ****************************************************************************/
+
+static void readline_write_all(int fd, FAR const char *buffer,
+                               size_t buflen)
+{
+  unsigned int stalls = 0;
+  size_t total = 0;
+
+  while (total < buflen)
+    {
+      ssize_t nwritten = write(fd, buffer + total, buflen - total);
+
+      if (nwritten > 0)
+        {
+          total += nwritten;
+          stalls = 0;
+        }
+      else if (nwritten < 0)
+        {
+          int errcode = errno;
+
+          if (errcode == EINTR)
+            {
+              continue;
+            }
+
+          if (errcode != EAGAIN && errcode != EWOULDBLOCK)
+            {
+              break;
+            }
+        }
+
+      if (++stalls >= READLINE_WRITE_MAX_STALLS)
+        {
+          break;
+        }
+
+      usleep(READLINE_WRITE_RETRY_USEC);
+    }
+}
 /****************************************************************************
  * Name: readline_putc
  ****************************************************************************/
 
-#ifdef CONFIG_READLINE_ECHO
 static void readline_putc(FAR struct rl_common_s *vtbl, int ch)
 {
   FAR struct readline_s *priv = (FAR struct readline_s *)vtbl;
   char buffer = ch;
-  ssize_t nwritten;
 
   DEBUGASSERT(priv);
 
@@ -127,24 +175,7 @@ static void readline_putc(FAR struct rl_common_s *vtbl, int ch)
       return;
     }
 
-  /* Loop until we successfully write a character (or until an unexpected
-   * error occurs).
-   */
-
-  do
-    {
-      /* Write the character to the outgoing stream */
-
-      nwritten = write(priv->outfd, &buffer, 1);
-
-      /* Check for irrecoverable write errors. */
-
-      if (nwritten < 0 && errno != EINTR)
-        {
-          break;
-        }
-    }
-  while (nwritten < 1);
+  readline_write_all(priv->outfd, &buffer, 1);
 }
 #endif
 
@@ -166,7 +197,7 @@ static void readline_write(FAR struct rl_common_s *vtbl,
       return;
     }
 
-  write(priv->outfd, buffer, buflen);
+  readline_write_all(priv->outfd, buffer, buflen);
 }
 #endif
 

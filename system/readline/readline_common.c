@@ -27,6 +27,7 @@
 #include <nuttx/config.h>
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
@@ -47,6 +48,11 @@
 #ifdef CONFIG_READLINE_CMD_HISTORY
 #  define RL_CMDHIST_LEN        CONFIG_READLINE_CMD_HISTORY_LEN
 #  define RL_CMDHIST_LINELEN    CONFIG_READLINE_CMD_HISTORY_LINELEN
+#endif
+
+#ifdef CONFIG_READLINE_ECHO
+#  define RL_WRITE_ARRAY(vtbl, array) \
+  RL_WRITE(vtbl, array, sizeof(array))
 #endif
 
 /****************************************************************************
@@ -100,9 +106,24 @@ static struct cmdhist_s g_cmdhist;
 #ifdef CONFIG_READLINE_ECHO
 static void move_cursor_left(FAR struct rl_common_s *vtbl, int count)
 {
-  while (count-- > 0)
+  char seq[16];
+  int len;
+
+  if (count <= 0)
     {
-      RL_WRITE(vtbl, g_cursorleft, sizeof(g_cursorleft));
+      return;
+    }
+
+  if (count == 1)
+    {
+      RL_WRITE_ARRAY(vtbl, g_cursorleft);
+      return;
+    }
+
+  len = snprintf(seq, sizeof(seq), "\x1b[%dD", count);
+  if (len > 0 && len < (int)sizeof(seq))
+    {
+      RL_WRITE(vtbl, seq, len);
     }
 }
 #endif
@@ -114,9 +135,24 @@ static void move_cursor_left(FAR struct rl_common_s *vtbl, int count)
 #ifdef CONFIG_READLINE_ECHO
 static void move_cursor_right(FAR struct rl_common_s *vtbl, int count)
 {
-  while (count-- > 0)
+  char seq[16];
+  int len;
+
+  if (count <= 0)
     {
-      RL_WRITE(vtbl, g_cursorright, sizeof(g_cursorright));
+      return;
+    }
+
+  if (count == 1)
+    {
+      RL_WRITE_ARRAY(vtbl, g_cursorright);
+      return;
+    }
+
+  len = snprintf(seq, sizeof(seq), "\x1b[%dC", count);
+  if (len > 0 && len < (int)sizeof(seq))
+    {
+      RL_WRITE(vtbl, seq, len);
     }
 }
 #endif
@@ -136,7 +172,7 @@ static void redraw_from_cursor(FAR struct rl_common_s *vtbl,
       RL_WRITE(vtbl, &buf[cursor], tail);
     }
 
-  RL_WRITE(vtbl, g_erasetoeol, sizeof(g_erasetoeol));
+  RL_WRITE_ARRAY(vtbl, g_erasetoeol);
   move_cursor_left(vtbl, tail);
 }
 #endif
@@ -149,7 +185,7 @@ static void redraw_from_cursor(FAR struct rl_common_s *vtbl,
 static void clear_input_line(FAR struct rl_common_s *vtbl, int cursor)
 {
   move_cursor_left(vtbl, cursor);
-  RL_WRITE(vtbl, g_erasetoeol, sizeof(g_erasetoeol));
+  RL_WRITE_ARRAY(vtbl, g_erasetoeol);
 }
 #endif
 
@@ -558,7 +594,7 @@ ssize_t readline_common(FAR struct rl_common_s *vtbl, FAR char *buf,
   /* <esc>[K is the VT100 command that erases to the end of the line. */
 
 #ifdef CONFIG_READLINE_ECHO
-  RL_WRITE(vtbl, g_erasetoeol, sizeof(g_erasetoeol));
+  RL_WRITE_ARRAY(vtbl, g_erasetoeol);
 #endif
 
   /* Read characters until we have a full line. On each the loop we must
