@@ -15,8 +15,9 @@ the live board state.
 | `/data/fruitclaw` | Volatile fallback FruitClaw data root. |
 | `/proc` | procfs runtime/kernel information when mounted. |
 
-FruitClaw does not block boot waiting for SD. If SD is unavailable, it uses
-`/data/fruitclaw` so serial, Telnet, MCP, and recovery remain responsive.
+The Fruit Jam profile enables the RP23xx SPI-SD automount path. If SD is not
+mounted and writable, FruitClaw uses `/data/fruitclaw` so serial, Telnet, MCP,
+and recovery remain responsive.
 
 ## FruitClaw Data Root
 

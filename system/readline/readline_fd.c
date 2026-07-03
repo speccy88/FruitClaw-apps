@@ -261,7 +261,11 @@ ssize_t readline_fd(FAR char *buf, int buflen, int infd, int outfd)
         }
 
 #ifdef CONFIG_READLINE_ECHO
+#ifdef CONFIG_READLINE_FORCE_ECHO
+      echo = true;
+#else
       echo = (cfg.c_lflag & ECHO) != 0;
+#endif
 #endif
     }
 

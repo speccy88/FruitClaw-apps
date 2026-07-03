@@ -55,7 +55,8 @@ Check the live address with `ifconfig wlan0` from the NuttX shell.
 
 ## Important Runtime Files
 
-The current profile prefers SD when it is already mounted and writable:
+The current profile enables the RP23xx SPI-SD automount path and then prefers
+SD when `/mnt/sd0` is mounted and writable:
 
 ```text
 /mnt/sd0/fruitclaw
@@ -70,8 +71,8 @@ If SD is absent or unhealthy, FruitClaw falls back to volatile tmpfs:
 
 This keeps serial, Telnet, MCP, and watchdog recovery responsive even when SD
 is absent or unhealthy. FruitClaw creates the SD data directory and ready
-marker only when the mounted SD path is writable; it does not block boot trying
-to mount media.
+marker only when the mounted SD path is writable; it does not run raw
+block-device mounts from owner tools or MCP.
 
 Important files under the data root:
 

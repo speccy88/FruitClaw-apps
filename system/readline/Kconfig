@@ -26,6 +26,15 @@ config READLINE_ECHO
 
 if READLINE_ECHO
 
+config READLINE_FORCE_ECHO
+	bool "Force readline echo independent of termios ECHO"
+	default n
+	---help---
+		Always echo characters from readline even when the input terminal's
+		ECHO flag is not set. This is useful for USB CDC consoles whose line
+		discipline starts with driver echo disabled, but where the shell
+		should still provide a visible interactive command line.
+
 config READLINE_TABCOMPLETION
 	bool "Tab completion"
 	default n

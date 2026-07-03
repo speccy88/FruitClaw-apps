@@ -96,7 +96,8 @@ FruitClaw data-root selection in this profile:
 /data/fruitclaw
 ```
 
-`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y` is enabled. If `/mnt/sd0` is mounted
+`CONFIG_RP23XX_SPISD_AUTOMOUNT=y` and
+`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y` are enabled. If `/mnt/sd0` is mounted
 and writable, FruitClaw creates/uses `/mnt/sd0/fruitclaw` and its ready marker.
 If SD is missing or not writable, it falls back to `/data/fruitclaw` so serial,
 Telnet, MCP, and watchdog diagnostics still come up.
@@ -109,6 +110,7 @@ Useful shell and built-in app features:
 CONFIG_NSH_BUILTIN_APPS=y
 CONFIG_NSH_READLINE=y
 CONFIG_NSH_USBCONSOLE=y
+CONFIG_READLINE_FORCE_ECHO=y
 CONFIG_READLINE_CMD_HISTORY=y
 CONFIG_READLINE_TABCOMPLETION=y
 CONFIG_SYSTEM_VI=y
@@ -120,6 +122,10 @@ CONFIG_SYSTEM_SPITOOL=y
 ```
 
 NuttX `help` shows the live command and app list.
+
+The CDC driver itself starts with driver echo off; readline provides the single
+visible command echo. FruitClaw's interactive prompts accept CR and LF so
+default `tio /dev/cu.usbmodem01` input works for setup commands.
 
 ## Display And Graphics
 

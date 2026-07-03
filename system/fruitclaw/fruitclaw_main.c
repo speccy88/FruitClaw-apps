@@ -2130,7 +2130,17 @@ static int read_prompt_line(const char *prompt, char *out, size_t out_len,
 {
   struct termios oldt;
   struct termios newt;
+  size_t pos = 0;
   bool changed = false;
+  bool overflow = false;
+  bool tty;
+
+  if (out == NULL || out_len == 0)
+    {
+      return -EINVAL;
+    }
+
+  tty = isatty(STDIN_FILENO);
 
   if (prompt != NULL)
     {
@@ -2138,35 +2148,116 @@ static int read_prompt_line(const char *prompt, char *out, size_t out_len,
       fflush(stdout);
     }
 
-  if (secret && isatty(STDIN_FILENO) &&
-      tcgetattr(STDIN_FILENO, &oldt) == 0)
+  if (tty && tcgetattr(STDIN_FILENO, &oldt) == 0)
     {
       newt = oldt;
-      newt.c_lflag &= ~ECHO;
-      if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &newt) == 0)
+      newt.c_lflag &= ~(ECHO | ICANON);
+      newt.c_cc[VMIN] = 1;
+      newt.c_cc[VTIME] = 0;
+      if (tcsetattr(STDIN_FILENO, TCSANOW, &newt) == 0)
         {
           changed = true;
         }
     }
 
-  if (fgets(out, out_len, stdin) == NULL)
+  for (; ; )
     {
-      if (changed)
+      char ch;
+      ssize_t nread = read(STDIN_FILENO, &ch, 1);
+
+      if (nread == 0)
         {
-          tcsetattr(STDIN_FILENO, TCSAFLUSH, &oldt);
-          printf("\n");
+          out[pos] = '\0';
+          if (changed)
+            {
+              tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+            }
+
+          return -EIO;
         }
 
-      return -EIO;
+      if (nread < 0)
+        {
+          if (errno == EINTR)
+            {
+              continue;
+            }
+
+          out[pos] = '\0';
+          if (changed)
+            {
+              tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+            }
+
+          return -errno;
+        }
+
+      if (ch == '\r' || ch == '\n')
+        {
+          if (tty)
+            {
+              write(STDOUT_FILENO, "\n", 1);
+            }
+
+          break;
+        }
+
+      if (ch == 0x03)
+        {
+          out[0] = '\0';
+          if (tty)
+            {
+              write(STDOUT_FILENO, "\n", 1);
+            }
+
+          if (changed)
+            {
+              tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+            }
+
+          return -EINTR;
+        }
+
+      if (ch == '\b' || ch == 0x7f)
+        {
+          if (pos > 0)
+            {
+              pos--;
+              if (tty && !secret)
+                {
+                  write(STDOUT_FILENO, "\b \b", 3);
+                }
+            }
+
+          continue;
+        }
+
+      if (pos + 1 < out_len)
+        {
+          out[pos++] = ch;
+          if (tty && !secret)
+            {
+              write(STDOUT_FILENO, &ch, 1);
+            }
+        }
+      else
+        {
+          overflow = true;
+        }
     }
 
   if (changed)
     {
-      tcsetattr(STDIN_FILENO, TCSAFLUSH, &oldt);
-      printf("\n");
+      tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
     }
 
+  out[pos] = '\0';
   fc_trim(out);
+  if (overflow)
+    {
+      return -ENOSPC;
+    }
+
   return out[0] == '\0' ? -EINVAL : 0;
 }
 

@@ -70,8 +70,11 @@ not include the separate TRMNL display client or switch `/dev/fb0` to the
 `fruitclaw tools` on the board to see what the running image actually compiled.
 
 The current Fruit Jam `esp-hosted` profile enables
-`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y`.  On first use, FruitClaw prefers SD
-only when the board-level SD path is already mounted and writable:
+`CONFIG_RP23XX_SPISD_AUTOMOUNT=y` and
+`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y`.  Board bring-up registers the SPI SD
+block device and attempts the NuttX RP23xx automount path for `/mnt/sd0`.
+FruitClaw then uses the SD data root only when that path is mounted and
+writable:
 
 ```text
 /mnt/sd0/fruitclaw
@@ -84,10 +87,11 @@ If SD is missing or not writable, FruitClaw falls back to volatile tmpfs:
 /data/fruitclaw
 ```
 
-FruitClaw only chooses between visible roots; it does not perform a blocking SD
-mount attempt during boot.  The RP23xx board bring-up owns `/dev/mmcsd0`
-registration and `/mnt/sd0` mounting so an unhealthy SD card cannot wedge the
-operator shell while FruitClaw is answering commands.
+FruitClaw itself only chooses between visible roots.  It does not run ad-hoc
+raw block-device mounts from owner tools or MCP.  The RP23xx board bring-up
+owns `/dev/mmcsd0` registration and `/mnt/sd0` mounting; if SD is absent,
+unformatted, or not writable, FruitClaw falls back to `/data/fruitclaw` so the
+operator shell and network services still come up.
 
 Generic `device.read` and `device.write` calls intentionally reject block
 devices such as `/dev/mmcsd0`, `/dev/ram*`, `/dev/mtd*`, and any path that
@@ -147,6 +151,13 @@ supports it, then writes `secrets/telegram_token` or
 `secrets/deepseek_api_key` under the active data root.  FruitClaw trims
 whitespace and common serial-shell `\n` / `\r` suffixes when reading these
 one-line secret files.
+
+The production USB CDC console is configured for default `tio` use:
+`CONFIG_NSH_DISABLE_ECHOBACK` is unset and
+`CONFIG_READLINE_FORCE_ECHO=y`, so NSH commands are echoed once even though the
+CDC driver echo flag is off.  FruitClaw's own prompt reader accepts both CR and
+LF, so interactive commands such as `fruitclaw config set-wifi` work when a
+terminal sends carriage return.
 
 For unattended provisioning over CDC serial, the same commands also accept a
 bounded value argument and still avoid printing the secret back:

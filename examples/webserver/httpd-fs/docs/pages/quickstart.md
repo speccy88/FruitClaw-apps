@@ -43,8 +43,9 @@ The web manual is served by the board on port 80.
 ## 3. Enter Local Runtime Config
 
 FruitClaw stores runtime files under the active data root. The current profile
-prefers `/mnt/sd0/fruitclaw` when SD is mounted and writable, and falls back to
-`/data/fruitclaw` when SD is absent. Enter Wi-Fi and API secrets from NSH:
+enables RP23xx SPI-SD automount, prefers `/mnt/sd0/fruitclaw` when SD is
+mounted and writable, and falls back to `/data/fruitclaw` when SD is absent or
+not writable. Enter Wi-Fi and API secrets from NSH:
 
 ```sh
 fruitclaw config set-wifi
@@ -53,8 +54,9 @@ fruitclaw config set-secret deepseek
 ```
 
 The secret prompts do not print the entered value when the console supports
-terminal echo control.  `fruitclaw status` reports only whether each secret is
-present.
+terminal echo control. The USB CDC console echoes ordinary NSH commands once
+with default `tio`, and FruitClaw setup prompts accept carriage return.
+`fruitclaw status` reports only whether each secret is present.
 
 ## 4. Check Core Services
 
