@@ -6,6 +6,8 @@
 ** https://github.com/Skiars/berry/blob/master/LICENSE
 ********************************************************************/
 #include "berry.h"
+#include <nuttx/config.h>
+
 
 /* this file contains the declaration of the module table. */
 
@@ -23,6 +25,9 @@ be_extern_native_module(solidify);
 be_extern_native_module(introspect);
 be_extern_native_module(strict);
 be_extern_native_module(undefined);
+#ifdef CONFIG_INTERPRETERS_BERRY_LVGL
+be_extern_native_module(lv);
+#endif
 
 /* user-defined modules declare start */
 
@@ -68,6 +73,9 @@ BERRY_LOCAL const bntvmodule_t* const be_module_table[] = {
     &be_native_module(strict),
 #endif
     &be_native_module(undefined),
+#ifdef CONFIG_INTERPRETERS_BERRY_LVGL
+    &be_native_module(lv),
+#endif
     /* user-defined modules register start */
 
     /* user-defined modules register end */

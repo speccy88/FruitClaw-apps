@@ -36,7 +36,9 @@ MODULE = $(CONFIG_EXAMPLES_WEBSERVER)
 
 # Common build
 
-httpd_fsdata.c: httpd-fs/*
+HTTPD_FSDATA_FILES := $(shell find httpd-fs -type f | sort)
+
+httpd_fsdata.c: $(HTTPD_FSDATA_FILES)
 	$(TOPDIR)/tools/mkfsdata.pl
 
 clean::

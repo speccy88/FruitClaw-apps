@@ -75,6 +75,21 @@ config NETUTILS_HTTPD_CGIPATH
 		REST style interface over HTTP, where my CGI handlers just return a
 		HTTP status code with a content length of 0.
 
+config NETUTILS_HTTPD_POST
+	bool "POST request body support"
+	default n
+	---help---
+		This option lets the uIP web server accept bounded HTTP request
+		bodies with Content-Length.  Chunked request bodies are still
+		rejected.  This is intended for small CGI/REST style handlers.
+
+config NETUTILS_HTTPD_MAX_BODY
+	int "Maximum POST body size"
+	default 4096
+	depends on NETUTILS_HTTPD_POST
+	---help---
+		Maximum accepted HTTP request body size in bytes.
+
 config NETUTILS_HTTPD_ERRPATH
 	string "Error Path"
 	default ""

@@ -112,6 +112,9 @@
 #define BG8 RGB8_BLACK
 #define FG8 RGB8_WHITE
 
+#define BG2 0
+#define FG2 3
+
 /* Total cells in the map */
 
 #define TOTAL_CELLS (CONFIG_GAMES_CGOL_MAPWIDTH * CONFIG_GAMES_CGOL_MAPHEIGHT)
@@ -515,7 +518,8 @@ static void cgol_advance(unsigned int *map)
 static void cgol_render_update(const struct fb_state_s *state)
 {
 #ifdef CONFIG_FB_UPDATE
-  struct fb_area_s *full_screen;
+  struct fb_area_s full_screen;
+  int err;
 
   /* Create an area with the dimensions of the full screen for updating the
    * frame buffer after render operations are complete.
@@ -523,8 +527,8 @@ static void cgol_render_update(const struct fb_state_s *state)
 
   full_screen.x = 0;
   full_screen.y = 0;
-  full_screen.w = fb_state.vinfo.xres;
-  full_screen.h = fb_state.vinfo.yres;
+  full_screen.w = state->vinfo.xres;
+  full_screen.h = state->vinfo.yres;
 #endif
 
   /* If double buffering, copy the RAM buffer to the frame buffer */
@@ -536,7 +540,7 @@ static void cgol_render_update(const struct fb_state_s *state)
   /* If the frame buffer on this device needs explicit updates, do that */
 
 #ifdef CONFIG_FB_UPDATE
-  err = ioctl(fb_state.fd, FBIO_UPDATE, (uintptr_t)&full_screen);
+  err = ioctl(state->fd, FBIO_UPDATE, (uintptr_t)&full_screen);
   if (err < 0)
     {
       fprintf(stderr, "Couldn't update screen: %d\n", errno);
@@ -566,6 +570,10 @@ static void cgol_render_clear(const struct fb_state_s *state)
 
   switch (state->pinfo.bpp)
     {
+    case 2:
+      memset(render_buf(state), BG2, state->pinfo.fblen);
+      break;
+
     case 32:
       for (uint32_t y = 0; y < state->pinfo.yres_virtual; y++)
         {
@@ -606,6 +614,55 @@ static void cgol_render_clear(const struct fb_state_s *state)
     case 8:
       memset(render_buf(state), BG8, state->pinfo.fblen);
       break;
+    }
+}
+
+/****************************************************************************
+ * Name: cgol_y2_set_pixel
+ *
+ * Description:
+ *   Sets a packed 2-bit grayscale pixel.
+ *
+ ****************************************************************************/
+
+static void cgol_y2_set_pixel(uint8_t *buffer, uint32_t stride,
+                              uint32_t x, uint32_t y, uint8_t value)
+{
+  uint8_t *pixel;
+  unsigned int shift;
+
+  pixel = &buffer[y * stride + (x >> 2)];
+  shift = (3 - (x & 3)) * 2;
+  *pixel = (*pixel & ~(3u << shift)) | ((value & 3u) << shift);
+}
+
+/****************************************************************************
+ * Name: cgol_render_cell2
+ *
+ * Description:
+ *   Renders living cell with packed FB_FMT_Y2 2bpp grayscale.
+ *
+ ****************************************************************************/
+
+static void cgol_render_cell2(const struct fb_state_s *state, uint32_t x,
+                              uint32_t y)
+{
+  uint8_t *buffer = render_buf(state);
+
+  /* Scale the (x, y) coordinates */
+
+  x *= state->scale;
+  y *= state->scale;
+
+  /* Starting at the (x, y) pair, we draw `scale` cells in each direction */
+
+  for (uint8_t yy = 0; yy < state->scale; yy++)
+    {
+      for (uint8_t xx = 0; xx < state->scale; xx++)
+        {
+          cgol_y2_set_pixel(buffer, state->pinfo.stride,
+                            x + xx, y + yy, FG2);
+        }
     }
 }
 
@@ -792,6 +849,13 @@ static void cgol_render_alive(const struct fb_state_s *state,
 
   switch (state->pinfo.bpp)
     {
+    case 2:
+      if (state->vinfo.fmt == FB_FMT_Y2)
+        {
+          render_cell = cgol_render_cell2;
+        }
+      break;
+
     case 32:
       render_cell = cgol_render_cell32;
       break;
@@ -945,6 +1009,19 @@ int main(int argc, FAR char *argv[])
     {
       fprintf(stderr, "Couldn't get frame buffer plane information: %d\n",
               errno);
+      close(fb_state.fd);
+      return EXIT_FAILURE;
+    }
+
+  if (!((fb_state.pinfo.bpp == 2 &&
+         fb_state.vinfo.fmt == FB_FMT_Y2) ||
+        fb_state.pinfo.bpp == 8 ||
+        fb_state.pinfo.bpp == 16 ||
+        fb_state.pinfo.bpp == 24 ||
+        fb_state.pinfo.bpp == 32))
+    {
+      fprintf(stderr, "Unsupported frame buffer format: fmt=%u bpp=%u\n",
+              fb_state.vinfo.fmt, fb_state.pinfo.bpp);
       close(fb_state.fd);
       return EXIT_FAILURE;
     }

@@ -1,10 +1,7 @@
-%!: /header.html
-  <p>
-  These web pages are served by a small web server running on top of
-  the <a href="http://www.sics.se/~adam/uip/">uIP embedded TCP/IP
-  stack</a>.
-  </p>
-  <p>
-  Click on the links above for web server statistics.
-  </p>
-%!: /footer.html
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=/index.html#/home">
+<script>
+  location.replace("/index.html" + (location.hash || "#/home"));
+</script>
+<a href="/index.html#/home">Open the FruitClaw wiki</a>

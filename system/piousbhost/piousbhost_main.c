@@ -73,7 +73,9 @@ static bool g_piousbhost_initialized;
 static bool g_piousbhost_waiter_started;
 static bool g_piousbhost_post_start_done;
 static volatile bool g_piousbhost_guard_active;
+#ifdef CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD
 static volatile bool g_piousbhost_guard_feed_running;
+#endif
 
 /****************************************************************************
  * Private Types
@@ -93,7 +95,9 @@ struct piousbhost_hiddev_s
 
 static int piousbhost_guardon(void);
 static void piousbhost_guardrefresh(void);
+#ifdef CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD
 static int piousbhost_guardfeed_start(void);
+#endif
 static int piousbhost_hidwait_counts(unsigned int keyboards,
                                      unsigned int mice,
                                      unsigned int seconds,
@@ -106,7 +110,9 @@ static int piousbhost_hidwait_counts(unsigned int keyboards,
 static void piousbhost_usage(FAR const char *progname)
 {
   fprintf(stderr,
-          "Usage: %s [init|waiter|start|start-guarded|recover|scan|vbuscycle|hubstatus|hubpower|guardon|guardoff|status|info|hidstatus|hidwait|hidwatch]\n",
+          "Usage: %s [init|waiter|start|start-guarded|recover|scan|"
+          "vbuscycle|hubstatus|hubpower|guardon|guardoff|status|info|"
+          "hidstatus|hidwait|hidwatch]\n",
           progname);
 }
 
@@ -131,10 +137,12 @@ static int piousbhost_info(void)
       return EXIT_FAILURE;
     }
 
-  printf("piousbhost: init=%u timer=%u frame-thread=%u pending=%u active=%u frame=%" PRIu32 "\n",
+  printf("piousbhost: init=%u timer=%u frame-thread=%u pending=%u "
+         "active=%u frame=%" PRIu32 "\n",
          info.initialized, info.timer_started, info.frame_thread_started,
          info.frame_pending, info.frame_active, info.frame_number);
-  printf("root: init=%u connected=%u fullspeed=%u suspended=%u event=%u line=%u dp=%u dm=%u\n",
+  printf("root: init=%u connected=%u fullspeed=%u suspended=%u event=%u "
+         "line=%u dp=%u dm=%u\n",
          info.root_initialized, info.root_connected, info.root_fullspeed,
          info.root_suspended, info.root_event, info.root_line_state,
          info.root_pin_dp, info.root_pin_dm);
@@ -455,11 +463,18 @@ static int piousbhost_wait_hub_settled(FAR const char *label,
             }
         }
 
-      if (ports > 0 && disabled == 0)
+      if (ports > 0 && disabled == 0 && unpowered < ports)
         {
           printf("piousbhost: %s settled ports=%u connected=%u "
                  "unpowered=%u\n", label, ports, connected, unpowered);
           return EXIT_SUCCESS;
+        }
+
+      if (ports > 0 && unpowered == ports && elapsed >= 3)
+        {
+          fprintf(stderr, "ERROR: %s all downstream ports unpowered\n",
+                  label);
+          return EXIT_FAILURE;
         }
 
       if ((elapsed % 3) == 0)
@@ -687,9 +702,9 @@ static void piousbhost_guardrefresh(void)
 #endif
 }
 
+#ifdef CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD
 static FAR void *piousbhost_guardfeed(FAR void *arg)
 {
-#ifdef CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD
   uint32_t elapsed = 0;
 
   UNUSED(arg);
@@ -704,16 +719,12 @@ static FAR void *piousbhost_guardfeed(FAR void *arg)
     }
 
   g_piousbhost_guard_feed_running = false;
-#else
-  UNUSED(arg);
-#endif
 
   return NULL;
 }
 
 static int piousbhost_guardfeed_start(void)
 {
-#ifdef CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD
   pthread_attr_t attr;
   pthread_t thread;
   int ret;
@@ -741,10 +752,8 @@ static int piousbhost_guardfeed_start(void)
 
   printf("piousbhost: bootguard refresher started\n");
   return OK;
-#else
-  return -ENOSYS;
-#endif
 }
+#endif
 
 static int piousbhost_vbuscycle(void)
 {

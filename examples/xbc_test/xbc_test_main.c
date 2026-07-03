@@ -71,8 +71,14 @@
 int main(int argc, FAR char *argv[])
 {
   char buffer[256];
+  FAR const char *devname = CONFIG_EXAMPLES_XBC_DEVNAME;
   ssize_t nbytes;
   int fd;
+
+  if (argc > 1)
+    {
+      devname = argv[1];
+    }
 
   /* Eventually logic here will open the controller device and perform the
    * controller test.
@@ -86,8 +92,8 @@ int main(int argc, FAR char *argv[])
 
       do
         {
-          printf("Opening device %s\n", CONFIG_EXAMPLES_XBC_DEVNAME);
-          fd = open(CONFIG_EXAMPLES_XBC_DEVNAME, O_RDONLY);
+          printf("Opening device %s\n", devname);
+          fd = open(devname, O_RDONLY);
           if (fd < 0)
             {
                printf("Failed: %d\n", errno);
@@ -97,7 +103,7 @@ int main(int argc, FAR char *argv[])
         }
       while (fd < 0);
 
-      printf("Device %s opened\n", CONFIG_EXAMPLES_XBC_DEVNAME);
+      printf("Device %s opened\n", devname);
       fflush(stdout);
 
       /* Loop until there is a read failure (or EOF?) */
@@ -116,18 +122,18 @@ int main(int argc, FAR char *argv[])
                 {
                   struct xbox_controller_buttonstate_s *rpt =
                          (FAR struct xbox_controller_buttonstate_s *)buffer;
-                  printf("guide: %d  sync: %d  start: %d  back: %d
-                          a: %d  b: %d  x: %d  y: %d\n",
+                  printf("guide: %d  sync: %d  start: %d  back: %d "
+                         "a: %d  b: %d  x: %d  y: %d\n",
                           rpt->guide, rpt->sync, rpt->start,
                           rpt->back, rpt->a, rpt->b, rpt->x, rpt->y);
-                  printf("dpad_u: %d  d: %d  l: %d  r: %d  bump_l: %d
-                          r: %d  stick_l: %d  r: %d\n",
+                  printf("dpad_u: %d  d: %d  l: %d  r: %d  bump_l: %d "
+                         "r: %d  stick_l: %d  r: %d\n",
                           rpt->dpad_up, rpt->dpad_down, rpt->dpad_left,
                           rpt->dpad_right, rpt->bumper_left,
                           rpt->bumper_right, rpt->stick_click_left,
                           rpt->stick_click_right);
-                  printf("stick_left_x: %d  y: %d  right_x: %d  y: %d
-                          trigger_l: %d  r: %d\n",
+                  printf("stick_left_x: %d  y: %d  right_x: %d  y: %d "
+                         "trigger_l: %d  r: %d\n",
                           rpt->stick_left_x, rpt->stick_left_y,
                           rpt->stick_right_x, rpt->stick_right_y,
                           rpt->trigger_left, rpt->trigger_right);
@@ -136,8 +142,7 @@ int main(int argc, FAR char *argv[])
         }
       while (nbytes > 0);
 
-      printf("Closing device %s: %zd\n", CONFIG_EXAMPLES_XBC_DEVNAME,
-              nbytes);
+      printf("Closing device %s: %zd\n", devname, nbytes);
       fflush(stdout);
       close(fd);
       break;

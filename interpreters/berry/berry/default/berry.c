@@ -8,9 +8,14 @@
 #include "berry.h"
 #include "be_repl.h"
 #include "be_vm.h"
+#include <nuttx/config.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef CONFIG_INTERPRETERS_BERRY_LVGL
+extern void be_lvgl_cleanup(bvm *vm);
+#endif
 
 /* using GNU/readline library */
 #if defined(USE_READLINE_LIB)
@@ -197,7 +202,7 @@ static int handle_result(bvm *vm, int res)
     case BE_EXIT: /* return exit code */
         return be_toindex(vm, -1);
     case BE_IO_ERROR:
-        be_writestring("error: "); 
+        be_writestring("error: ");
         be_writestring(be_tostring(vm, -1));
         be_writenewline();
         return -2;
@@ -334,7 +339,17 @@ static void berry_custom_paths(bvm *vm, const char *modulepath)
     free(copy);
 }
 
-/* 
+#ifdef CONFIG_INTERPRETERS_BERRY_LVGL_GLOBAL
+static void berry_preload_lvgl(bvm *vm)
+{
+    if (be_getmodule(vm, "lv")) {
+        be_setglobal(vm, "lv");
+        be_pop(vm, 1);
+    }
+}
+#endif
+
+/*
  * command format: berry [options] [script [args]]
  *  command options:
  *   -i: enter interactive mode after executing 'script'
@@ -364,16 +379,16 @@ static int analysis_args(bvm *vm, int argc, char *argv[])
         be_pop(vm, 1);
         return -1;
     }
-    
+
     if (args & arg_m) {
-        berry_custom_paths(vm, opt.modulepath);        
+        berry_custom_paths(vm, opt.modulepath);
         args &= ~arg_m;
     }
     else {
         // use default module paths
         berry_paths(vm);
     }
-    
+
     if (args & arg_g) {
         comp_set_named_gbl(vm); /* forced named global in VM code */
         args &= ~arg_g;         /* clear the flag for this option not to interfere with other options */
@@ -403,7 +418,13 @@ int main(int argc, char *argv[])
 {
     int res;
     bvm *vm = be_vm_new(); /* create a virtual machine instance */
+#ifdef CONFIG_INTERPRETERS_BERRY_LVGL_GLOBAL
+    berry_preload_lvgl(vm);
+#endif
     res = analysis_args(vm, argc, argv);
+#ifdef CONFIG_INTERPRETERS_BERRY_LVGL
+    be_lvgl_cleanup(vm);
+#endif
     be_vm_delete(vm); /* free all objects and vm */
     return res;
 }

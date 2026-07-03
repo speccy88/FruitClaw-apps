@@ -33,7 +33,9 @@ if(CONFIG_INTERPRETERS_BERRY)
           ${CMAKE_CURRENT_LIST_DIR}/berry BINARY_DIR
           ${CMAKE_BINARY_DIR}/apps/interpreters/berry/berry
       PATCH_COMMAND
-        patch -l -p1 -d ${CMAKE_CURRENT_LIST_DIR}/berry -i
+        perl -pi -e "s/\\r$//"
+        ${CMAKE_CURRENT_LIST_DIR}/berry/default/berry.c
+        COMMAND patch -l -p1 -d ${CMAKE_CURRENT_LIST_DIR}/berry -i
         ${CMAKE_CURRENT_LIST_DIR}/0001-Fix-Berry-default-port-for-NuttX.patch
       DOWNLOAD_NO_PROGRESS true
       TIMEOUT 30)
@@ -100,6 +102,11 @@ if(CONFIG_INTERPRETERS_BERRY)
       ${BERRY_DIR}/src/be_vm.c
       ${BERRY_DIR}/default/be_modtab.c
       ${BERRY_DIR}/default/be_port.c)
+
+  if(CONFIG_INTERPRETERS_BERRY_LVGL)
+    list(APPEND BERRY_CSRCS ${CMAKE_CURRENT_LIST_DIR}/be_lvgl.c)
+    list(APPEND BERRY_INCDIR ${CMAKE_CURRENT_LIST_DIR}/../../graphics/lvgl)
+  endif()
 
   add_custom_command(
     OUTPUT ${BERRY_GEN_STAMP}

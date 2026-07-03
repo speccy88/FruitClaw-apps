@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifdef CONFIG_SYSTEM_DVICTRL_START_GUARD
@@ -54,6 +55,7 @@
 #define DVICTRL_BOOTGUARD_MAGIC 0x464a4247 /* "FJBG" */
 #define DVICTRL_BOOTGUARD_STAGE_START 0x44564931 /* "DVI1" */
 #define DVICTRL_USEC_PER_MSEC 1000u
+#define DVICTRL_DEFAULT_STRESS_SECONDS 10u
 
 #define RP23XX_DVIIOC_GETINFO _FBIOC(0x00f0)
 
@@ -99,6 +101,36 @@ struct rp23xx_dvi_info_s
   uint32_t command_read_addr;
   uint32_t command_write_addr;
   uint32_t command_trans_count;
+  uint32_t app_buffer_addr;
+  uint32_t scanout_buffer_addr[2];
+  uint32_t active_scanout_addr;
+  uint32_t dma_source_addr;
+  uint32_t buffer_count;
+  uint32_t app_scanout_same;
+  uint32_t front_back_buffering;
+  uint32_t app_buffer_internal;
+  uint32_t scanout_buffer_internal[2];
+  uint32_t frames_started;
+  uint32_t frames_completed;
+  uint32_t dma_irq_count;
+  uint32_t framebuffer_write_count;
+  uint32_t framebuffer_mmap_count;
+  uint32_t framebuffer_update_count;
+  uint32_t front_back_swaps;
+  uint32_t missed_swaps;
+  uint32_t copy_to_scanout_count;
+  uint32_t copy_to_scanout_busy_count;
+  uint32_t writes_to_active_buffer_detected;
+  uint32_t active_scanout_buffer_index;
+  uint32_t writable_buffer_index;
+  uint32_t pending_scanout_buffer_index;
+  uint32_t hstx_restart_count;
+  uint32_t hstx_reconfig_count;
+  uint32_t dma_error_count;
+  uint32_t buffer_conflict_count;
+  uint32_t copy_in_progress;
+  uint32_t max_copy_time_us;
+  uint32_t max_frame_gap_us;
 };
 
 /****************************************************************************
@@ -112,10 +144,14 @@ static void dvictrl_usage(FAR const char *progname, int exitcode)
           "  %s info\n"
           "  %s pattern colorbars\n"
           "  %s solid <rgb565>\n"
+          "  %s stress static\n"
+          "  %s stress full [seconds]\n"
+          "  %s stress partial [seconds]\n"
           "  %s start [--unguarded] [--guard-timeout <ms>]"
           " [--guard-window <ms>]\n"
           "  %s stop\n",
-          progname, progname, progname, progname, progname);
+          progname, progname, progname, progname, progname, progname,
+          progname, progname);
   exit(exitcode);
 }
 
@@ -226,6 +262,41 @@ static int dvictrl_print_info(int fd)
          " write=0x%08" PRIx32 " count=%" PRIu32 "\n",
          dinfo.command_ctrl, dinfo.command_read_addr,
          dinfo.command_write_addr, dinfo.command_trans_count);
+  printf("buffers: count=%" PRIu32 " split=%s frontback=%" PRIu32
+         " app=0x%08" PRIx32 " active=0x%08" PRIx32
+         " dma=0x%08" PRIx32 "\n",
+         dinfo.buffer_count, dinfo.app_scanout_same ? "no" : "yes",
+         dinfo.front_back_buffering, dinfo.app_buffer_addr,
+         dinfo.active_scanout_addr, dinfo.dma_source_addr);
+  printf("scanout: [0]=0x%08" PRIx32 " sram=%" PRIu32
+         " [1]=0x%08" PRIx32 " sram=%" PRIu32
+         " app_sram=%" PRIu32 "\n",
+         dinfo.scanout_buffer_addr[0], dinfo.scanout_buffer_internal[0],
+         dinfo.scanout_buffer_addr[1], dinfo.scanout_buffer_internal[1],
+         dinfo.app_buffer_internal);
+  printf("ownership: active=%" PRIu32 " writable=%" PRIu32
+         " pending=%" PRIu32 " copying=%" PRIu32 "\n",
+         dinfo.active_scanout_buffer_index, dinfo.writable_buffer_index,
+         dinfo.pending_scanout_buffer_index, dinfo.copy_in_progress);
+  printf("refresh: copies=%" PRIu32 " swaps=%" PRIu32
+         " missed=%" PRIu32 " busy=%" PRIu32
+         " conflicts=%" PRIu32 " active_writes=%" PRIu32 "\n",
+         dinfo.copy_to_scanout_count, dinfo.front_back_swaps,
+         dinfo.missed_swaps, dinfo.copy_to_scanout_busy_count,
+         dinfo.buffer_conflict_count,
+         dinfo.writes_to_active_buffer_detected);
+  printf("counters: started=%" PRIu32 " completed=%" PRIu32
+         " dma_irq=%" PRIu32 " fb_write=%" PRIu32
+         " fb_mmap=%" PRIu32 " fb_update=%" PRIu32 "\n",
+         dinfo.frames_started, dinfo.frames_completed,
+         dinfo.dma_irq_count, dinfo.framebuffer_write_count,
+         dinfo.framebuffer_mmap_count, dinfo.framebuffer_update_count);
+  printf("timing: max_copy=%" PRIu32 " us max_frame_gap=%" PRIu32
+         " us hstx_start=%" PRIu32 " hstx_reconfig=%" PRIu32
+         " dma_errors=%" PRIu32 "\n",
+         dinfo.max_copy_time_us, dinfo.max_frame_gap_us,
+         dinfo.hstx_restart_count, dinfo.hstx_reconfig_count,
+         dinfo.dma_error_count);
 
   return 0;
 }
@@ -503,7 +574,8 @@ static int dvictrl_map_framebuffer(int fd,
       return ret;
     }
 
-  if (vinfo->fmt != FB_FMT_RGB16_565 || pinfo->bpp != 16)
+  if (!((vinfo->fmt == FB_FMT_RGB16_565 && pinfo->bpp == 16) ||
+        (vinfo->fmt == FB_FMT_Y2 && pinfo->bpp == 2)))
     {
       fprintf(stderr, "ERROR: unsupported framebuffer format/bpp: %u/%u\n",
               vinfo->fmt, pinfo->bpp);
@@ -521,6 +593,49 @@ static int dvictrl_map_framebuffer(int fd,
   return 0;
 }
 
+static uint8_t dvictrl_rgb565_to_y2(uint16_t color)
+{
+  uint32_t r = (color >> 11) & 0x1f;
+  uint32_t g = (color >> 5) & 0x3f;
+  uint32_t b = color & 0x1f;
+  uint32_t y;
+
+  r = (r << 1) | (r >> 4);
+  b = (b << 1) | (b >> 4);
+  y = (r * 30 + g * 59 + b * 11) / 100;
+
+  return (uint8_t)((y * 3 + 31) / 63);
+}
+
+static void dvictrl_set_y2_pixel(FAR uint8_t *fbmem,
+                                 FAR const struct fb_planeinfo_s *pinfo,
+                                 unsigned int x, unsigned int y,
+                                 uint8_t value)
+{
+  FAR uint8_t *pixel;
+  unsigned int shift;
+
+  pixel = &fbmem[y * pinfo->stride + (x >> 2)];
+  shift = (3 - (x & 3)) * 2;
+  *pixel = (*pixel & ~(3u << shift)) | ((value & 3u) << shift);
+}
+
+static void dvictrl_set_pixel(FAR uint8_t *fbmem,
+                              FAR const struct fb_videoinfo_s *vinfo,
+                              FAR const struct fb_planeinfo_s *pinfo,
+                              unsigned int x, unsigned int y,
+                              uint16_t color)
+{
+  if (vinfo->fmt == FB_FMT_Y2 && pinfo->bpp == 2)
+    {
+      dvictrl_set_y2_pixel(fbmem, pinfo, x, y,
+                           dvictrl_rgb565_to_y2(color));
+      return;
+    }
+
+  ((FAR uint16_t *)(fbmem + y * pinfo->stride))[x] = color;
+}
+
 static void dvictrl_fill_solid(FAR uint8_t *fbmem,
                                FAR const struct fb_videoinfo_s *vinfo,
                                FAR const struct fb_planeinfo_s *pinfo,
@@ -531,13 +646,33 @@ static void dvictrl_fill_solid(FAR uint8_t *fbmem,
 
   for (y = 0; y < vinfo->yres; y++)
     {
-      FAR uint16_t *row = (FAR uint16_t *)(fbmem + y * pinfo->stride);
-
       for (x = 0; x < vinfo->xres; x++)
         {
-          row[x] = color;
+          dvictrl_set_pixel(fbmem, vinfo, pinfo, x, y, color);
         }
     }
+}
+
+static int dvictrl_update_full(int fd, FAR const struct fb_videoinfo_s *vinfo)
+{
+#ifdef CONFIG_FB_UPDATE
+  struct fb_area_s area;
+
+  area.x = 0;
+  area.y = 0;
+  area.w = vinfo->xres;
+  area.h = vinfo->yres;
+
+  if (ioctl(fd, FBIO_UPDATE, (uintptr_t)&area) < 0)
+    {
+      return -errno;
+    }
+#else
+  UNUSED(fd);
+  UNUSED(vinfo);
+#endif
+
+  return 0;
 }
 
 static void dvictrl_fill_colorbars(FAR uint8_t *fbmem,
@@ -555,8 +690,6 @@ static void dvictrl_fill_colorbars(FAR uint8_t *fbmem,
 
   for (y = 0; y < vinfo->yres; y++)
     {
-      FAR uint16_t *row = (FAR uint16_t *)(fbmem + y * pinfo->stride);
-
       for (x = 0; x < vinfo->xres; x++)
         {
           unsigned int bar = x / bar_width;
@@ -566,7 +699,7 @@ static void dvictrl_fill_colorbars(FAR uint8_t *fbmem,
               bar = nitems(colors) - 1;
             }
 
-          row[x] = colors[bar];
+          dvictrl_set_pixel(fbmem, vinfo, pinfo, x, y, colors[bar]);
         }
     }
 }
@@ -585,7 +718,12 @@ static int dvictrl_pattern_colorbars(int fd)
     }
 
   dvictrl_fill_colorbars(fbmem, &vinfo, &pinfo);
+  ret = dvictrl_update_full(fd, &vinfo);
   munmap(fbmem, pinfo.fblen);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   printf("filled colorbars\n");
   return 0;
@@ -615,10 +753,227 @@ static int dvictrl_solid(int fd, FAR const char *arg)
     }
 
   dvictrl_fill_solid(fbmem, &vinfo, &pinfo, (uint16_t)value);
+  ret = dvictrl_update_full(fd, &vinfo);
   munmap(fbmem, pinfo.fblen);
+  if (ret < 0)
+    {
+      return ret;
+    }
 
   printf("filled solid 0x%04lx\n", value);
   return 0;
+}
+
+static uint64_t dvictrl_time_ms(void)
+{
+  struct timespec ts;
+
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) < 0)
+    {
+      return 0;
+    }
+
+  return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+static uint32_t dvictrl_stress_seconds(int argc, FAR char *argv[])
+{
+  uint32_t seconds = DVICTRL_DEFAULT_STRESS_SECONDS;
+
+  if (argc >= 4 && dvictrl_parse_u32(argv[3], &seconds) < 0)
+    {
+      dvictrl_usage(argv[0], EXIT_FAILURE);
+    }
+
+  return seconds;
+}
+
+static void dvictrl_draw_rect(FAR uint8_t *fbmem,
+                              FAR const struct fb_videoinfo_s *vinfo,
+                              FAR const struct fb_planeinfo_s *pinfo,
+                              unsigned int x, unsigned int y,
+                              unsigned int w, unsigned int h,
+                              uint16_t color)
+{
+  unsigned int xend = MIN(x + w, vinfo->xres);
+  unsigned int yend = MIN(y + h, vinfo->yres);
+  unsigned int yy;
+  unsigned int xx;
+
+  for (yy = y; yy < yend; yy++)
+    {
+      for (xx = x; xx < xend; xx++)
+        {
+          dvictrl_set_pixel(fbmem, vinfo, pinfo, xx, yy, color);
+        }
+    }
+}
+
+static void dvictrl_fill_moving(FAR uint8_t *fbmem,
+                                FAR const struct fb_videoinfo_s *vinfo,
+                                FAR const struct fb_planeinfo_s *pinfo,
+                                uint32_t frame)
+{
+  static const uint16_t colors[] =
+    {
+      0xf800, 0xffe0, 0x07e0, 0x07ff,
+      0x001f, 0xf81f, 0xffff, 0x0000
+    };
+  unsigned int x;
+  unsigned int y;
+
+  for (y = 0; y < vinfo->yres; y++)
+    {
+      for (x = 0; x < vinfo->xres; x++)
+        {
+          unsigned int bar = ((x + frame * 4) / 20 + y / 30) %
+                             nitems(colors);
+
+          dvictrl_set_pixel(fbmem, vinfo, pinfo, x, y, colors[bar]);
+        }
+    }
+}
+
+static int dvictrl_stress_static(int fd)
+{
+  struct fb_videoinfo_s vinfo;
+  struct fb_planeinfo_s pinfo;
+  FAR uint8_t *fbmem;
+  int ret;
+
+  ret = dvictrl_map_framebuffer(fd, &vinfo, &pinfo, &fbmem);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  dvictrl_fill_colorbars(fbmem, &vinfo, &pinfo);
+  ret = dvictrl_update_full(fd, &vinfo);
+  munmap(fbmem, pinfo.fblen);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  printf("stress static: filled once and stopped writing\n");
+  return 0;
+}
+
+static int dvictrl_stress_full(int fd, uint32_t seconds)
+{
+  struct fb_videoinfo_s vinfo;
+  struct fb_planeinfo_s pinfo;
+  FAR uint8_t *fbmem;
+  uint64_t end;
+  uint32_t frames = 0;
+  int ret;
+
+  ret = dvictrl_map_framebuffer(fd, &vinfo, &pinfo, &fbmem);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  end = dvictrl_time_ms() + (uint64_t)seconds * 1000u;
+  while (seconds == 0 || dvictrl_time_ms() < end)
+    {
+      dvictrl_fill_moving(fbmem, &vinfo, &pinfo, frames);
+      dvictrl_update_full(fd, &vinfo);
+      frames++;
+      if ((frames & 3) == 0)
+        {
+          usleep(1000);
+        }
+    }
+
+  munmap(fbmem, pinfo.fblen);
+  printf("stress full: wrote %" PRIu32 " frames in %" PRIu32 " seconds\n",
+         frames, seconds);
+  return 0;
+}
+
+static int dvictrl_stress_partial(int fd, uint32_t seconds)
+{
+  static const uint16_t colors[] =
+    {
+      0xf800, 0xffe0, 0x07e0, 0x07ff,
+      0x001f, 0xf81f, 0xffff, 0x0000
+    };
+  struct fb_videoinfo_s vinfo;
+  struct fb_planeinfo_s pinfo;
+  FAR uint8_t *fbmem;
+  uint64_t end;
+  uint32_t frames = 0;
+  unsigned int oldx = 0;
+  unsigned int oldy = 0;
+  unsigned int xspan;
+  unsigned int yspan;
+  int ret;
+
+  ret = dvictrl_map_framebuffer(fd, &vinfo, &pinfo, &fbmem);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  dvictrl_fill_solid(fbmem, &vinfo, &pinfo, 0x0000);
+  xspan = vinfo.xres > 48 ? vinfo.xres - 48 : 1;
+  yspan = vinfo.yres > 32 ? vinfo.yres - 32 : 1;
+  end = dvictrl_time_ms() + (uint64_t)seconds * 1000u;
+  while (seconds == 0 || dvictrl_time_ms() < end)
+    {
+      unsigned int x = (frames * 7) % xspan;
+      unsigned int y = (frames * 5) % yspan;
+
+      dvictrl_draw_rect(fbmem, &vinfo, &pinfo, oldx, oldy, 48, 32, 0x0000);
+      dvictrl_draw_rect(fbmem, &vinfo, &pinfo, x, y, 48, 32,
+                        colors[frames % nitems(colors)]);
+      dvictrl_update_full(fd, &vinfo);
+      oldx = x;
+      oldy = y;
+      frames++;
+      usleep(1000);
+    }
+
+  munmap(fbmem, pinfo.fblen);
+  printf("stress partial: wrote %" PRIu32 " rectangles in %" PRIu32
+         " seconds\n",
+         frames, seconds);
+  return 0;
+}
+
+static int dvictrl_stress(int fd, int argc, FAR char *argv[])
+{
+  uint32_t seconds;
+
+  if (argc < 3 || argc > 4)
+    {
+      dvictrl_usage(argv[0], EXIT_FAILURE);
+    }
+
+  if (strcmp(argv[2], "static") == 0)
+    {
+      if (argc != 3)
+        {
+          dvictrl_usage(argv[0], EXIT_FAILURE);
+        }
+
+      return dvictrl_stress_static(fd);
+    }
+
+  seconds = dvictrl_stress_seconds(argc, argv);
+  if (strcmp(argv[2], "full") == 0)
+    {
+      return dvictrl_stress_full(fd, seconds);
+    }
+
+  if (strcmp(argv[2], "partial") == 0)
+    {
+      return dvictrl_stress_partial(fd, seconds);
+    }
+
+  dvictrl_usage(argv[0], EXIT_FAILURE);
+  return -EINVAL;
 }
 
 /****************************************************************************
@@ -672,6 +1027,10 @@ int main(int argc, FAR char *argv[])
         }
 
       ret = dvictrl_solid(fd, argv[2]);
+    }
+  else if (strcmp(argv[1], "stress") == 0)
+    {
+      ret = dvictrl_stress(fd, argc, argv);
     }
   else
     {

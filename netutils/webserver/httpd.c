@@ -88,6 +88,10 @@
 #define ISO_SLASH   0x2f
 #define ISO_COLON   0x3a
 
+#ifdef CONFIG_NETUTILS_HTTPD_SINGLECONNECT
+#  define HTTPD_USE_SINGLECONNECT 1
+#endif
+
 #ifndef CONFIG_NETUTILS_HTTPD_PATH
 #  define CONFIG_NETUTILS_HTTPD_PATH "/mnt"
 #endif
@@ -352,7 +356,7 @@ static int send_chunk(struct httpd_state *pstate, const char *buf, int len)
     {
       httpd_dumpbuffer("Outgoing chunk", buf, len);
       ret = send(pstate->ht_sockfd, buf, len, 0);
-      if (ret < 0)
+      if (ret <= 0)
         {
           return ERROR;
         }
@@ -363,6 +367,147 @@ static int send_chunk(struct httpd_state *pstate, const char *buf, int len)
   while (len > 0);
 
   return OK;
+}
+
+static const char *httpd_status_text(int status)
+{
+  switch (status)
+    {
+      case 200:
+        return "OK";
+      case 202:
+        return "Accepted";
+      case 204:
+        return "No Content";
+      case 400:
+        return "Bad Request";
+      case 405:
+        return "Method Not Allowed";
+      case 408:
+        return "Request Timeout";
+      case 411:
+        return "Length Required";
+      case 413:
+        return "Payload Too Large";
+      case 414:
+        return "URI Too Long";
+      case 415:
+        return "Unsupported Media Type";
+      case 500:
+        return "Internal Server Error";
+      case 501:
+        return "Not Implemented";
+      case 505:
+        return "HTTP Version Not Supported";
+      default:
+        return status >= 400 ? "Error" : "OK";
+    }
+}
+
+static void httpd_copy_header_value(FAR char *dst, size_t dstlen,
+                                    FAR const char *src)
+{
+  if (dst == NULL || dstlen == 0)
+    {
+      return;
+    }
+
+  if (src == NULL)
+    {
+      dst[0] = '\0';
+      return;
+    }
+
+  strlcpy(dst, src, dstlen);
+}
+
+static bool httpd_header_contains(FAR const char *value,
+                                  FAR const char *token)
+{
+  size_t token_len;
+
+  if (value == NULL || token == NULL)
+    {
+      return false;
+    }
+
+  token_len = strlen(token);
+  while (*value != '\0')
+    {
+      if (strncasecmp(value, token, token_len) == 0)
+        {
+          return true;
+        }
+
+      value++;
+    }
+
+  return false;
+}
+
+static void httpd_free_request(struct httpd_state *pstate)
+{
+  if (pstate->ht_body != NULL)
+    {
+      free(pstate->ht_body);
+      pstate->ht_body = NULL;
+    }
+
+  pstate->ht_bodylen = 0;
+  pstate->ht_content_length = 0;
+  pstate->ht_content_length_present = false;
+  pstate->ht_content_type[0] = '\0';
+  pstate->ht_accept[0] = '\0';
+  pstate->ht_origin[0] = '\0';
+  pstate->ht_authorization[0] = '\0';
+  pstate->ht_mcp_protocol_version[0] = '\0';
+  pstate->ht_mcp_session_id[0] = '\0';
+}
+
+int httpd_send_response(FAR struct httpd_state *pstate, int status,
+                        FAR const char *content_type,
+                        FAR const char *extra_headers,
+                        FAR const char *body, int body_len)
+{
+  char header[HTTPD_MAX_HEADERLEN + 256];
+  int hdrlen;
+  int ret;
+
+  if (body == NULL || body_len < 0)
+    {
+      body = "";
+      body_len = 0;
+    }
+
+#ifndef CONFIG_NETUTILS_HTTPD_KEEPALIVE_DISABLE
+  pstate->ht_keepalive = false;
+#endif
+
+  hdrlen = snprintf(header, sizeof(header),
+                    "HTTP/1.0 %d %s\r\n"
+#ifndef CONFIG_NETUTILS_HTTPD_SERVERHEADER_DISABLE
+                    "Server: uIP/NuttX http://nuttx.org/\r\n"
+#endif
+                    "Connection: close\r\n"
+                    "Content-Type: %s\r\n"
+                    "Content-Length: %d\r\n"
+                    "%s"
+                    "\r\n",
+                    status, httpd_status_text(status),
+                    content_type ? content_type : "text/plain",
+                    body_len, extra_headers ? extra_headers : "");
+  if (hdrlen < 0 || hdrlen >= (int)sizeof(header))
+    {
+      return ERROR;
+    }
+
+  ret = send_chunk(pstate, header, hdrlen);
+  if (ret < 0 || body_len == 0)
+    {
+      return ret;
+    }
+
+  return send_chunk(pstate, body, body_len);
 }
 
 static int httpd_senderror(struct httpd_state *pstate, int status)
@@ -496,6 +641,74 @@ done:
   return ret;
 }
 
+static int httpd_read_body(struct httpd_state *pstate, size_t buffered)
+{
+#ifdef CONFIG_NETUTILS_HTTPD_POST
+  size_t off;
+
+  if (pstate->ht_method != HTTPD_METHOD_POST)
+    {
+      return 0;
+    }
+
+  if (!pstate->ht_content_length_present)
+    {
+      return 411;
+    }
+
+  if (pstate->ht_content_length > CONFIG_NETUTILS_HTTPD_MAX_BODY)
+    {
+      return 413;
+    }
+
+  pstate->ht_body = calloc(1, pstate->ht_content_length + 1);
+  if (pstate->ht_body == NULL)
+    {
+      return 500;
+    }
+
+  off = MIN((size_t)pstate->ht_content_length, buffered);
+  if (off > 0)
+    {
+      memcpy(pstate->ht_body, pstate->ht_buffer, off);
+    }
+
+  while (off < (size_t)pstate->ht_content_length)
+    {
+      ssize_t r;
+
+      r = recv(pstate->ht_sockfd, pstate->ht_body + off,
+               pstate->ht_content_length - off, 0);
+      if (r == 0)
+        {
+          return 400;
+        }
+
+#  if CONFIG_NETUTILS_HTTPD_TIMEOUT > 0
+      if (r == -1 && errno == EWOULDBLOCK)
+        {
+          return 408;
+        }
+#  endif
+
+      if (r == -1)
+        {
+          return 400;
+        }
+
+      off += r;
+    }
+
+  pstate->ht_body[pstate->ht_content_length] = '\0';
+  pstate->ht_bodylen = pstate->ht_content_length;
+  return 0;
+#else
+  (void)pstate;
+  (void)buffered;
+  return 0;
+#endif
+}
+
 static inline int httpd_parse(struct httpd_state *pstate)
 {
   char *o;
@@ -509,6 +722,7 @@ static inline int httpd_parse(struct httpd_state *pstate)
 
   state = STATE_METHOD;
   o = pstate->ht_buffer;
+  pstate->ht_method = HTTPD_METHOD_GET;
 
   do
     {
@@ -579,38 +793,71 @@ static inline int httpd_parse(struct httpd_state *pstate)
           char *v;
 
           case STATE_METHOD:
-            if (0 != strncmp(start, "GET ", 4))
-              {
-                nwarn("WARNING: method not supported\n");
-                return 501;
-              }
+            {
+              char *method = start;
+              char *path = strchr(start, ' ');
 
-            start += 4;
-            v = start + strcspn(start, " ");
+              if (path == NULL)
+                {
+                  return 400;
+                }
 
-            if (0 != strcmp(v, " HTTP/1.0") && 0 != strcmp(v, " HTTP/1.1"))
-              {
-                nwarn("WARNING: HTTP version not supported\n");
-                return 505;
-              }
+              *path++ = '\0';
+              v = path + strcspn(path, " ");
 
-            /* TODO: url decoding */
+              if (0 != strcmp(v, " HTTP/1.0") &&
+                  0 != strcmp(v, " HTTP/1.1"))
+                {
+                  nwarn("WARNING: HTTP version not supported\n");
+                  return 505;
+                }
 
-            if (v - start >= sizeof pstate->ht_filename)
-              {
-                nerr("ERROR: ht_filename overflow\n");
-                return 414;
-              }
+              if (strcmp(method, "GET") == 0)
+                {
+                  pstate->ht_method = HTTPD_METHOD_GET;
+                }
+              else if (strcmp(method, "POST") == 0)
+                {
+#ifdef CONFIG_NETUTILS_HTTPD_POST
+                  pstate->ht_method = HTTPD_METHOD_POST;
+#else
+                  return 501;
+#endif
+                }
+              else if (strcmp(method, "DELETE") == 0)
+                {
+                  pstate->ht_method = HTTPD_METHOD_DELETE;
+                }
+              else if (strcmp(method, "OPTIONS") == 0)
+                {
+                  pstate->ht_method = HTTPD_METHOD_OPTIONS;
+                }
+              else
+                {
+                  pstate->ht_method = HTTPD_METHOD_UNSUPPORTED;
+                  return 501;
+                }
 
-            *v = '\0';
-            strlcpy(pstate->ht_filename, start, sizeof(pstate->ht_filename));
-            state = STATE_HEADER;
+              /* TODO: url decoding */
+
+              if (v - path >= sizeof pstate->ht_filename)
+                {
+                  nerr("ERROR: ht_filename overflow\n");
+                  return 414;
+                }
+
+              *v = '\0';
+              strlcpy(pstate->ht_filename, path,
+                      sizeof(pstate->ht_filename));
+              state = STATE_HEADER;
+            }
             break;
 
           case STATE_HEADER:
             if (*start == '\0')
               {
                 state = STATE_BODY;
+                start = end;
                 break;
               }
 
@@ -630,10 +877,60 @@ static inline int httpd_parse(struct httpd_state *pstate)
             ninfo("[%d] Request header %s: %s\n",
                   pstate->ht_sockfd, start, v);
 
-            if (0 == strcasecmp(start, "Content-Length") && 0 != atoi(v))
+            if (0 == strcasecmp(start, "Content-Length"))
               {
-                nwarn("WARNING: non-zero request length\n");
-                return 413;
+                char *endptr;
+                long length = strtol(v, &endptr, 10);
+
+                if (*endptr != '\0' || length < 0)
+                  {
+                    return 400;
+                  }
+
+                pstate->ht_content_length_present = true;
+                pstate->ht_content_length = length;
+#ifndef CONFIG_NETUTILS_HTTPD_POST
+                if (length != 0)
+                  {
+                    nwarn("WARNING: non-zero request length\n");
+                    return 413;
+                  }
+#endif
+              }
+            else if (0 == strcasecmp(start, "Transfer-Encoding") &&
+                     httpd_header_contains(v, "chunked"))
+              {
+                return 501;
+              }
+            else if (0 == strcasecmp(start, "Content-Type"))
+              {
+                httpd_copy_header_value(pstate->ht_content_type,
+                                        sizeof(pstate->ht_content_type), v);
+              }
+            else if (0 == strcasecmp(start, "Accept"))
+              {
+                httpd_copy_header_value(pstate->ht_accept,
+                                        sizeof(pstate->ht_accept), v);
+              }
+            else if (0 == strcasecmp(start, "Origin"))
+              {
+                httpd_copy_header_value(pstate->ht_origin,
+                                        sizeof(pstate->ht_origin), v);
+              }
+            else if (0 == strcasecmp(start, "Authorization"))
+              {
+                httpd_copy_header_value(pstate->ht_authorization,
+                                        sizeof(pstate->ht_authorization), v);
+              }
+            else if (0 == strcasecmp(start, "MCP-Protocol-Version"))
+              {
+                httpd_copy_header_value(pstate->ht_mcp_protocol_version,
+                    sizeof(pstate->ht_mcp_protocol_version), v);
+              }
+            else if (0 == strcasecmp(start, "MCP-Session-Id"))
+              {
+                httpd_copy_header_value(pstate->ht_mcp_session_id,
+                    sizeof(pstate->ht_mcp_session_id), v);
               }
 #ifndef CONFIG_NETUTILS_HTTPD_KEEPALIVE_DISABLE
             else if (0 == strcasecmp(start, "Connection") &&
@@ -645,11 +942,13 @@ static inline int httpd_parse(struct httpd_state *pstate)
             break;
 
           case STATE_BODY:
-
-            /* Not implemented */
-
             break;
           }
+
+          if (state == STATE_BODY)
+            {
+              break;
+            }
        }
 
       /* Shuffle down for the next block */
@@ -659,8 +958,17 @@ static inline int httpd_parse(struct httpd_state *pstate)
     }
   while (state != STATE_BODY);
 
+    {
+      int ret = httpd_read_body(pstate, o - pstate->ht_buffer);
+      if (ret != 0)
+        {
+          return ret;
+        }
+    }
+
 #ifdef CONFIG_NETUTILS_HTTPD_CLASSIC
-  if (0 == strcmp(pstate->ht_filename, "/"))
+  if (pstate->ht_method == HTTPD_METHOD_GET &&
+      0 == strcmp(pstate->ht_filename, "/"))
     {
       strlcpy(pstate->ht_filename, "/" CONFIG_NETUTILS_HTTPD_INDEX,
               sizeof(pstate->ht_filename));
@@ -701,6 +1009,28 @@ static void *httpd_handler(void *arg)
       memset(pstate, 0, sizeof(struct httpd_state));
       pstate->ht_sockfd = sockfd;
 
+#if CONFIG_NETUTILS_HTTPD_TIMEOUT > 0
+        {
+          struct timeval tv;
+
+          tv.tv_sec  = CONFIG_NETUTILS_HTTPD_TIMEOUT;
+          tv.tv_usec = 0;
+          if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv,
+                         sizeof(struct timeval)) < 0)
+            {
+              nwarn("WARNING: setsockopt SO_RCVTIMEO failure: %d\n",
+                    errno);
+            }
+
+          if (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv,
+                         sizeof(struct timeval)) < 0)
+            {
+              nwarn("WARNING: setsockopt SO_SNDTIMEO failure: %d\n",
+                    errno);
+            }
+        }
+#endif
+
 #ifndef CONFIG_NETUTILS_HTTPD_KEEPALIVE_DISABLE
       do
         {
@@ -718,6 +1048,8 @@ static void *httpd_handler(void *arg)
               httpd_sendfile(pstate);
             }
 
+          httpd_free_request(pstate);
+
 #ifndef CONFIG_NETUTILS_HTTPD_KEEPALIVE_DISABLE
         }
       while (pstate->ht_keepalive);
@@ -725,24 +1057,33 @@ static void *httpd_handler(void *arg)
 
       /* End of command processing -- Clean up and exit */
 
+      httpd_free_request(pstate);
       free(pstate);
     }
 
   /* Exit the task */
 
   ninfo("[%d] Exiting\n", sockfd);
+
+  /* Some small TCP stacks need a short drain window after the final response
+   * write.  Closing immediately after send() can make stricter HTTP clients
+   * observe resets and can leave the server-side TCP path unhealthy after a
+   * handful of rapid MCP calls.
+   */
+
+  usleep(100 * 1000);
   close(sockfd);
   return NULL;
 }
 
-#ifdef CONFIG_NETUTILS_HTTPD_SINGLECONNECT
+#ifdef HTTPD_USE_SINGLECONNECT
 static void single_server(uint16_t portno, pthread_startroutine_t handler,
                           int stacksize)
 {
   struct sockaddr_in myaddr;
   socklen_t addrlen;
   int listensd;
-  int acceptsd;
+  int acceptsd = -1;
 #ifdef CONFIG_NET_SOLINGER
   struct linger ling;
 #endif
@@ -805,11 +1146,16 @@ static void single_server(uint16_t portno, pthread_startroutine_t handler,
       /* Handle the request. This blocks until complete. */
 
       handler((FAR void *)acceptsd);
+      acceptsd = -1;
     }
 
   /* Close the sockets */
 
-  close(acceptsd);
+  if (acceptsd >= 0)
+    {
+      close(acceptsd);
+    }
+
   close(listensd);
 }
 #endif
@@ -837,7 +1183,7 @@ int httpd_listen(void)
 {
   /* Execute httpd_handler on each connection to port 80 */
 
-#ifdef CONFIG_NETUTILS_HTTPD_SINGLECONNECT
+#ifdef HTTPD_USE_SINGLECONNECT
   single_server(HTONS(80), httpd_handler, CONFIG_NETUTILS_HTTPDSTACKSIZE);
 #else
   netlib_server(HTONS(80), httpd_handler, CONFIG_NETUTILS_HTTPDSTACKSIZE);

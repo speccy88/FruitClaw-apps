@@ -27,4 +27,26 @@ config EXAMPLES_LVGLDEMO_INPUT_DEVPATH
 	---help---
 		The path to the touchscreen device. Default: "/dev/input0"
 
+config EXAMPLES_LVGLDEMO_KEYBOARD_DEVPATH
+	string "Keyboard device path"
+	default "/dev/kbd0"
+	depends on INPUT_KEYBOARD
+	---help---
+		The path to the NuttX keyboard device. Default: "/dev/kbd0"
+
+config EXAMPLES_LVGLDEMO_MOUSE_DEVPATH
+	string "Mouse device path"
+	default "/dev/mouse0"
+	depends on INPUT_MOUSE
+	---help---
+		The path to the NuttX mouse device. Default: "/dev/mouse0"
+
+config EXAMPLES_LVGLDEMO_MOUSE_WHEEL_STEP
+	int "Mouse wheel scroll step"
+	default 12
+	range 1 64
+	depends on INPUT_MOUSE_WHEEL
+	---help---
+		Vertical scroll pixels per mouse wheel report delta.
+
 endif # EXAMPLES_LVGLDEMO

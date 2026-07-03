@@ -40,4 +40,39 @@ config INTERPRETERS_BERRY_STACKSIZE
 	---help---
 		Size of the stack allocated for the Berry interpreter main task.
 
+config INTERPRETERS_BERRY_LVGL
+	bool "Berry LVGL bindings"
+	default n
+	depends on GRAPHICS_LVGL
+	depends on LV_USE_NUTTX
+	---help---
+		Enable a small native Berry module named lv that drives LVGL
+		through the NuttX LVGL framebuffer backend.  This is intended
+		for boards that already expose a working framebuffer such as
+		/dev/fb0.
+
+config INTERPRETERS_BERRY_LVGL_GLOBAL
+	bool "Preload Berry LVGL module as global lv"
+	default y
+	depends on INTERPRETERS_BERRY_LVGL
+	---help---
+		Load the lv module into the Berry global namespace when the
+		interpreter starts.  Scripts can still use import lv explicitly.
+
+config INTERPRETERS_BERRY_LVGL_MOUSE
+	bool "Berry LVGL mouse input"
+	default y if INPUT_MOUSE
+	depends on INTERPRETERS_BERRY_LVGL
+	depends on INPUT_MOUSE
+	---help---
+		Add a simple LVGL pointer input device backed by a NuttX mouse
+		character device.
+
+config INTERPRETERS_BERRY_LVGL_MOUSE_DEVPATH
+	string "Berry LVGL mouse device path"
+	default "/dev/mouse0"
+	depends on INTERPRETERS_BERRY_LVGL_MOUSE
+	---help---
+		Mouse device used by the Berry LVGL pointer input adapter.
+
 endif # INTERPRETERS_BERRY

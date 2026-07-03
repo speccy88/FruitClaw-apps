@@ -89,10 +89,24 @@
 #define HTTPD_MAX_CONTENTLEN  32
 #define HTTPD_MAX_HEADERLEN   220
 #define HTTPD_MAX_CHUNKEDLEN  16
+#define HTTPD_MAX_HDR_VALUE   96
+
+#ifndef CONFIG_NETUTILS_HTTPD_MAX_BODY
+#  define CONFIG_NETUTILS_HTTPD_MAX_BODY 4096
+#endif
 
 /****************************************************************************
  * Public types
  ****************************************************************************/
+
+enum httpd_method_e
+{
+  HTTPD_METHOD_GET = 0,
+  HTTPD_METHOD_POST,
+  HTTPD_METHOD_DELETE,
+  HTTPD_METHOD_OPTIONS,
+  HTTPD_METHOD_UNSUPPORTED
+};
 
 struct httpd_fs_file
 {
@@ -111,6 +125,17 @@ struct httpd_state
 {
   char ht_buffer[HTTPD_IOBUFFER_SIZE];  /* recv() buffer */
   char ht_filename[HTTPD_MAX_FILENAME]; /* filename from GET command */
+  enum httpd_method_e ht_method;         /* Parsed request method */
+  int ht_content_length;                 /* Parsed Content-Length */
+  bool ht_content_length_present;        /* True: Content-Length received */
+  FAR char *ht_body;                     /* Heap request body, NUL-terminated */
+  int ht_bodylen;                        /* Request body length */
+  char ht_content_type[HTTPD_MAX_HDR_VALUE];
+  char ht_accept[HTTPD_MAX_HDR_VALUE];
+  char ht_origin[HTTPD_MAX_HDR_VALUE];
+  char ht_authorization[HTTPD_MAX_HDR_VALUE];
+  char ht_mcp_protocol_version[HTTPD_MAX_HDR_VALUE];
+  char ht_mcp_session_id[HTTPD_MAX_HDR_VALUE];
 #ifndef CONFIG_NETUTILS_HTTPD_KEEPALIVE_DISABLE
   bool ht_keepalive;                    /* Connection: keep-alive */
 #endif
@@ -264,6 +289,21 @@ int httpd_send_datachunk(int sockfd, FAR void *data, int len, bool chunked);
  ****************************************************************************/
 
 int httpd_send_headers(FAR struct httpd_state *pstate, int status, int len);
+
+/****************************************************************************
+ * Name: httpd_send_response
+ *
+ * Description:
+ *   Sends a complete HTTP response with explicit content type, optional extra
+ *   headers, and optional body.  URL/CGI path handlers can use this for JSON
+ *   or other dynamic responses without fabricating an httpd_fs_file.
+ *
+ ****************************************************************************/
+
+int httpd_send_response(FAR struct httpd_state *pstate, int status,
+                        FAR const char *content_type,
+                        FAR const char *extra_headers,
+                        FAR const char *body, int body_len);
 
 #ifdef CONFIG_NETUTILS_HTTPDFSSTATS
 uint16_t httpd_fs_count(FAR char *name);

@@ -12,6 +12,9 @@
 #include <nuttx/config.h>
 
 #include <arch/rp23xx/watchdog.h>
+#if defined(CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD)
+#  include <arch/board/board.h>
+#endif
 #include <nuttx/timers/watchdog.h>
 
 #include <errno.h>
@@ -117,6 +120,11 @@ static int bootguard_status(int fd)
 
 static int bootguard_off(int fd)
 {
+#if defined(CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD)
+  board_fruitjam_bootguard_disarm();
+  printf("bootguard: disarmed\n");
+  return EXIT_SUCCESS;
+#else
   int ret;
 
   ret = ioctl(fd, WDIOC_SET_SCRATCH0, 0);
@@ -149,12 +157,20 @@ static int bootguard_off(int fd)
 
   printf("bootguard: disarmed\n");
   return EXIT_SUCCESS;
+#endif
 }
 
 static int bootguard_on(int fd, int argc, FAR char *argv[])
 {
-  uint32_t timeout = 15000;
+  uint32_t timeout =
+#if defined(CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD)
+    CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD_TIMEOUT_MS;
+#else
+    15000;
+#endif
+#if !defined(CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD)
   int ret;
+#endif
 
   if (argc > 2)
     {
@@ -166,6 +182,13 @@ static int bootguard_on(int fd, int argc, FAR char *argv[])
         }
     }
 
+#if defined(CONFIG_ADAFRUIT_FRUIT_JAM_RP2350_BOOT_GUARD)
+  (void)fd;
+
+  board_fruitjam_bootguard_arm_timeout(timeout);
+  printf("bootguard: armed for %" PRIu32 " ms\n", timeout);
+  return EXIT_SUCCESS;
+#else
   ret = ioctl(fd, WDIOC_SET_SCRATCH0, BOOTGUARD_MAGIC);
   if (ret < 0)
     {
@@ -203,6 +226,7 @@ static int bootguard_on(int fd, int argc, FAR char *argv[])
 
   printf("bootguard: armed for %" PRIu32 " ms\n", timeout);
   return EXIT_SUCCESS;
+#endif
 }
 
 static int bootguard_kick(int fd)

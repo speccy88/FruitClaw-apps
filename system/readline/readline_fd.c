@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <assert.h>
+#include <stdbool.h>
 #include <termios.h>
 
 #include "system/readline.h"
@@ -240,17 +241,28 @@ ssize_t readline_fd(FAR char *buf, int buflen, int infd, int outfd)
 
   struct readline_s vtbl;
   struct termios cfg;
+  bool is_tty = false;
+  bool canon = false;
+#ifdef CONFIG_READLINE_ECHO
+  bool echo = true;
+#endif
   ssize_t ret;
 
   if (isatty(infd))
     {
+      is_tty = true;
       tcgetattr(infd, &cfg);
       if (cfg.c_lflag & ICANON)
         {
+          canon = true;
           cfg.c_lflag &= ~ICANON;
           tcsetattr(infd, TCSANOW, &cfg);
           cfg.c_lflag |= ICANON;
         }
+
+#ifdef CONFIG_READLINE_ECHO
+      echo = (cfg.c_lflag & ECHO) != 0;
+#endif
     }
 
   /* Set up the vtbl structure */
@@ -261,14 +273,14 @@ ssize_t readline_fd(FAR char *buf, int buflen, int infd, int outfd)
 #ifdef CONFIG_READLINE_ECHO
   vtbl.vtbl.rl_putc  = readline_putc;
   vtbl.vtbl.rl_write = readline_write;
-  vtbl.outfd         = outfd;
+  vtbl.outfd         = echo ? outfd : -1;
 #endif
 
   /* The let the common readline logic do the work */
 
   ret = readline_common(&vtbl.vtbl, buf, buflen);
 
-  if (isatty(infd) && (cfg.c_lflag & ICANON))
+  if (is_tty && canon)
     {
       tcsetattr(infd, TCSANOW, &cfg);
     }

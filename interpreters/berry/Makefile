@@ -42,15 +42,23 @@ BERRY_SRCS += be_rangelib.c be_repl.c be_solidifylib.c be_strictlib.c
 BERRY_SRCS += be_string.c be_strlib.c be_syslib.c be_timelib.c
 BERRY_SRCS += be_undefinedlib.c be_var.c be_vector.c be_vm.c
 
+ifeq ($(CONFIG_INTERPRETERS_BERRY_LVGL),y)
+BERRY_SRCS += be_lvgl.c
+CFLAGS += ${INCDIR_PREFIX}$(APPDIR)$(DELIM)graphics$(DELIM)lvgl
+endif
+
 CSRCS = $(BERRY_SRCS)
 CSRCS += be_modtab.c be_port.c
+CSRCS += berry_runner.c
 
 MAINSRC = berry.c
 
 VPATH += $(BERRY_UNPACK)$(DELIM)src
 VPATH += $(BERRY_UNPACK)$(DELIM)default
+VPATH += .
 DEPPATH += --dep-path $(BERRY_UNPACK)$(DELIM)src
 DEPPATH += --dep-path $(BERRY_UNPACK)$(DELIM)default
+DEPPATH += --dep-path .
 
 CFLAGS += ${INCDIR_PREFIX}$(APPDIR)$(DELIM)interpreters$(DELIM)berry$(DELIM)include
 CFLAGS += ${INCDIR_PREFIX}$(APPDIR)$(DELIM)interpreters$(DELIM)berry$(DELIM)$(BERRY_UNPACK)$(DELIM)src
@@ -71,6 +79,7 @@ $(BERRY_UNPACK): $(BERRY_ARCHIVE)
 	$(Q) unzip -q -o $(BERRY_ARCHIVE)
 	$(call DELDIR, $(BERRY_UNPACK))
 	$(Q) mv berry-$(BERRY_COMMIT_ID) $(BERRY_UNPACK)
+	$(Q) perl -pi -e 's/\r$$//' $(BERRY_UNPACK)$(DELIM)default$(DELIM)berry.c
 	$(Q) patch -l -d $(BERRY_UNPACK) -p1 < 0001-Fix-Berry-default-port-for-NuttX.patch
 
 $(BERRY_GEN_STAMP): $(BERRY_UNPACK) $(BERRY_CONFIG)

@@ -131,6 +131,7 @@ void netlib_server(uint16_t portno,
 
       ret = pthread_create(&child, &attr,
                            handler, (pthread_addr_t)((uintptr_t)acceptsd));
+      pthread_attr_destroy(&attr);
       if (ret != 0)
         {
           /* Close the connection */
