@@ -5,7 +5,7 @@
     {
       "slug": "home",
       "title": "Home",
-      "file": "wiki/pages/home.md",
+      "file": "pages/home.md",
       "sources": [
         "apps/system/fruitclaw/README.md",
         "apps/system/fruitclaw/Kconfig",
@@ -17,7 +17,7 @@
     {
       "slug": "quickstart",
       "title": "Getting Started",
-      "file": "wiki/pages/quickstart.md",
+      "file": "pages/quickstart.md",
       "sources": [
         "apps/system/fruitclaw/README.md",
         "apps/system/fruitclaw/fruitclaw_main.c",
@@ -28,7 +28,7 @@
     {
       "slug": "guide",
       "title": "Complete Guide",
-      "file": "wiki/pages/guide.md",
+      "file": "pages/guide.md",
       "sources": [
         "apps/system/fruitclaw/README.md",
         "apps/system/fruitclaw/Kconfig",
@@ -42,7 +42,7 @@
     {
       "slug": "features",
       "title": "Features",
-      "file": "wiki/pages/features.md",
+      "file": "pages/features.md",
       "sources": [
         "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/configs/esp-hosted/defconfig",
         "apps/system/fruitclaw/Kconfig",
@@ -51,9 +51,32 @@
       ]
     },
     {
+      "slug": "utilities",
+      "title": "Utilities",
+      "file": "pages/utilities.md",
+      "sources": [
+        "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/configs/esp-hosted/defconfig",
+        "apps/system/fruitclaw/fruitclaw_main.c",
+        "apps/system/fruitclaw/caps/fc_caps_builtin.c",
+        "apps/system/fruitclaw/README.md"
+      ]
+    },
+    {
+      "slug": "devices",
+      "title": "Kernel And Devices",
+      "file": "pages/devices.md",
+      "sources": [
+        "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/configs/esp-hosted/defconfig",
+        "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/src/rp23xx_bringup.c",
+        "apps/system/fruitclaw/caps/fc_caps_builtin.c",
+        "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/ESP_HOSTED.md",
+        "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/SDIO.md"
+      ]
+    },
+    {
       "slug": "tools",
       "title": "Tools",
-      "file": "wiki/pages/tools.md",
+      "file": "pages/tools.md",
       "sources": [
         "apps/system/fruitclaw/fruitclaw_main.c",
         "apps/system/fruitclaw/caps/fc_caps_builtin.c",
@@ -63,7 +86,7 @@
     {
       "slug": "examples",
       "title": "Examples",
-      "file": "wiki/pages/examples.md",
+      "file": "pages/examples.md",
       "sources": [
         "apps/system/fruitclaw/README.md",
         "apps/system/fruitclaw/fruitclaw_main.c",
@@ -73,7 +96,7 @@
     {
       "slug": "build",
       "title": "Build",
-      "file": "wiki/pages/build.md",
+      "file": "pages/build.md",
       "sources": [
         "README.md",
         "apps/system/fruitclaw/README.md",
@@ -85,7 +108,7 @@
     {
       "slug": "hardware",
       "title": "Hardware",
-      "file": "wiki/pages/hardware.md",
+      "file": "pages/hardware.md",
       "sources": [
         "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/README.md",
         "nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/ESP_HOSTED.md",
@@ -96,7 +119,7 @@
     {
       "slug": "troubleshooting",
       "title": "Troubleshooting",
-      "file": "wiki/pages/troubleshooting.md",
+      "file": "pages/troubleshooting.md",
       "sources": [
         "apps/system/fruitclaw/README.md",
         "apps/system/fruitclaw/Kconfig",

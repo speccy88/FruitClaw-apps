@@ -96,6 +96,15 @@ config FRUITCLAW_PREFER_SD_DATA_DIR
 		first boot.  If the SD path is absent or unwritable, FruitClaw falls
 		back to FRUITCLAW_DATA_DIR so serial diagnostics still come up.
 
+config FRUITCLAW_WEB_HOME_MAX_BYTES
+	int "Maximum custom web home Markdown bytes"
+	default 4096
+	range 512 16384
+	---help---
+		Maximum size of the owner-editable Markdown body served at
+		/site/home.md and rendered by the root web page.  The content is
+		stored in www/home.md under the active FruitClaw data root.
+
 config FRUITCLAW_OWNER_MODE
 	bool "Enable owner-mode tools for trusted local and allowed Telegram users"
 	default y

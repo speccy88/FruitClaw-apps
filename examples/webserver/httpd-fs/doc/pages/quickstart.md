@@ -168,19 +168,19 @@ Telegram still uses the allowed chat file for inbound filtering.
 
 ## 8. Recovery Expectations
 
-This current build is an unattended bring-up image. It is intentionally biased
-toward getting back to ROM BOOTSEL without someone pressing reset. The current
-profile has:
+This release is configured as an unattended operator image. It is intentionally
+biased toward recovering back into FruitClaw without someone pressing reset.
+The current profile has:
 
 ```text
-CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=600000
-CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y
+CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=0
+# CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY is not set
 ```
 
 Risky operations are wrapped with watchdog guards, the session guard watches
-runtime progress, and the max-uptime fuse forces BOOTSEL after about 10
-minutes. For release-style images, set the max uptime guard to `0` and disable
-BOOTSEL recovery so watchdogs reset back into the app.
+runtime progress, and watchdog trips reset the board back into NuttX/FruitClaw.
+There is no fixed max-uptime reboot in this production profile. Use the manual
+`bootsel` command only when you intentionally want ROM BOOTSEL for flashing.
 
 Sources: `apps/system/fruitclaw/README.md`,
 `apps/system/fruitclaw/fruitclaw_main.c`,

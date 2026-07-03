@@ -85,9 +85,10 @@ The browser shell and Markdown pages are:
 
 ```text
 index.html
-wiki/index.json
-wiki/_nav.md
-wiki/pages/*.md
+doc/index.html
+doc/index.json
+doc/_nav.md
+doc/pages/*.md
 ```
 
 The embedded web filesystem C image is:

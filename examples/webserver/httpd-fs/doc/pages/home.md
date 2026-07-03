@@ -34,9 +34,9 @@ development image. It currently includes:
 - Conway's Game of Life as the `cgol` built-in app.
 - NeoPixel control through `/dev/leds0`.
 - USB keyboard, USB mouse, and Xbox controller support.
-- Watchdog and bootguard-style recovery tools for unattended bring-up.
+- Watchdog and bootguard-style recovery tools for unattended operator use.
 
-This is still active bring-up software, not a polished consumer appliance.
+This is still active operator software, not a locked-down consumer appliance.
 The direction is a practical board agent that a device owner can operate from
 Telegram, MCP, serial, Telnet, or local NuttX shell commands.
 

@@ -72,11 +72,12 @@ This is an owner-mode development image. MCP is intentionally YOLO in this
 profile: no bearer token, no default policy layer, and owner-mode tools are
 available to local MCP clients. Keep it on a trusted network.
 
-This build is configured for unattended bring-up. Most wedges recover through
-watchdog paths into ROM BOOTSEL, and the max-uptime fuse intentionally sends
-the board to BOOTSEL after about 10 minutes. For production-style images,
-disable `FRUITCLAW_GUARD_BOOTSEL_RECOVERY` and set
-`FRUITCLAW_MAX_UPTIME_GUARD_MS=0` so watchdogs reset back into the app.
+This build is configured for unattended operator use. Most wedges recover
+through watchdog paths that reset back into NuttX/FruitClaw, not ROM BOOTSEL.
+The development max-uptime fuse is disabled with
+`FRUITCLAW_MAX_UPTIME_GUARD_MS=0`, and `FRUITCLAW_GUARD_BOOTSEL_RECOVERY` is
+off. Use the manual `bootsel` command only when you intentionally want to
+reflash.
 
 Sources: `apps/system/fruitclaw/README.md`,
 `apps/system/fruitclaw/Kconfig`,

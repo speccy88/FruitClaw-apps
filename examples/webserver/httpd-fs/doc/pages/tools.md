@@ -115,7 +115,7 @@ MCP tools run as owner and can mutate board state.
 
 ## Visible Capability Tools
 
-The current MCP `tools/list` surface contains 28 visible tools:
+The current MCP `tools/list` surface contains 30 visible tools:
 
 | Tool | Use |
 | --- | --- |
@@ -128,6 +128,8 @@ The current MCP `tools/list` surface contains 28 visible tools:
 | `memory.read` | Read a bounded memory tail. |
 | `file.read` | Read bounded files under the FruitClaw data root. |
 | `file.write_limited` | Write files under `scripts/` or `notes/`. |
+| `web.home.read` | Read the Markdown rendered by the root web page. |
+| `web.home.write` | Replace the Markdown rendered by the root web page and served from `/site/home.md`. |
 | `script.list` | List generated Berry scripts under `scripts/generated/`. |
 | `script.read` | Read a generated Berry script for inspection. |
 | `script.write` | Create or replace a generated Berry script, with optional validation. |

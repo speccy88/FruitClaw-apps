@@ -363,6 +363,13 @@ int fc_init_data_dir(void)
       return ret;
     }
 
+  fc_bootstrap_note("data-subdir-www", 0);
+  if ((ret = fc_create_data_subdir("www")) < 0)
+    {
+      fc_bootstrap_note("data-subdir-failed", ret);
+      return ret;
+    }
+
   fc_bootstrap_note("data-subdir-certs", 0);
   if ((ret = fc_create_data_subdir("certs")) < 0)
     {

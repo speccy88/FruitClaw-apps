@@ -35,6 +35,7 @@ CSRCS += core/fc_selftest.c
 CSRCS += storage/fc_memory.c
 CSRCS += sched/fc_scheduler.c
 CSRCS += net/fc_http.c
+CSRCS += net/fc_web.c
 CSRCS += net/fc_telegram.c
 CSRCS += net/fc_deepseek.c
 ifeq ($(CONFIG_FRUITCLAW_MCP_SERVER),y)

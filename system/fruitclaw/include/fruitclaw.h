@@ -430,6 +430,9 @@ bool fc_path_has_parent_ref(const char *path);
 bool fc_path_is_secret(const char *path);
 bool fc_url_host_allowed(const char *url);
 int fc_json_escape(const char *in, char *out, size_t out_len);
+int fc_web_home_read(char *out, size_t out_len, bool *custom);
+int fc_web_home_write(const char *markdown);
+int fc_web_register_http(void);
 
 int fc_queue_init(fc_queue_t *q);
 int fc_queue_publish(fc_queue_t *q, const fc_event_t *ev);

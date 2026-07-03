@@ -26,16 +26,17 @@ CONFIG_FRUITCLAW_MCP_MAX_RESPONSE=32768
 CONFIG_FRUITCLAW_MCP_TOOL_TIMEOUT_MS=30000
 ```
 
-This unattended bring-up profile enables the blunt maximum uptime fuse:
+This production operator profile keeps watchdog recovery enabled but disables
+the development max-uptime fuse:
 
 ```text
-CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=600000
-CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y
+CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=0
+# CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY is not set
 ```
 
 Recovery is handled by per-operation guards and session watchdog behavior,
-with watchdog reset into the configured recovery target. In this image, that
-target is ROM BOOTSEL so the board can be reflashed without pressing reset.
+with watchdog reset back into NuttX/FruitClaw. ROM BOOTSEL remains a manual
+flashing/recovery command, not the automatic failure target in this release.
 
 ## Networking
 
@@ -212,14 +213,14 @@ CONFIG_SYSTEM_BOOTSEL=y
 CONFIG_SYSTEM_BOOTGUARD=y
 CONFIG_FRUITCLAW_ENABLE_EXEC_GUARD=y
 CONFIG_FRUITCLAW_ENABLE_SESSION_GUARD=y
-CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y
-CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=600000
+# CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY is not set
+CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=0
 ```
 
-This is an explicit bring-up image. It resets guarded failures and the
-10-minute max-uptime fuse into ROM BOOTSEL. Release-style images should turn
-off `FRUITCLAW_GUARD_BOOTSEL_RECOVERY` and set
-`FRUITCLAW_MAX_UPTIME_GUARD_MS=0`.
+This release is meant to be usable without babysitting the reset button. Guarded
+failures reset the RP2350 back into the FruitClaw app, and there is no timed
+max-uptime reboot. Use the manual `bootsel` command only when you intentionally
+want to reflash the board.
 
 Sources: `nuttx/boards/arm/rp23xx/adafruit-fruit-jam-rp2350/configs/esp-hosted/defconfig`,
 `apps/system/fruitclaw/Kconfig`,

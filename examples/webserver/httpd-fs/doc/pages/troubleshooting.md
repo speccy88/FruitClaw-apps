@@ -188,22 +188,20 @@ when the schedule should invoke the LLM/tool loop.
 
 ## Watchdog Recovery
 
-The unattended bring-up image should recover into ROM BOOTSEL if a guarded
-operation wedges. It also intentionally forces BOOTSEL after about 10 minutes
-so long unattended tests do not leave the board stuck.
+The production operator image should recover back into NuttX/FruitClaw if a
+guarded operation wedges. It does not intentionally force ROM BOOTSEL after a
+fixed uptime.
 
 Useful facts:
 
 ```text
-CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=600000
-CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y
+CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=0
+# CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY is not set
 ```
 
 `fruitclaw guard-test` intentionally trips a watchdog path. Run it only for a
-planned reset/recovery test.
-
-For production-style images, set the max uptime guard to `0` and disable
-BOOTSEL recovery so watchdogs reset back into the app.
+planned reset/recovery test; the expected target in this release is the app
+booting again, not ROM BOOTSEL.
 
 ## Known Boundaries
 

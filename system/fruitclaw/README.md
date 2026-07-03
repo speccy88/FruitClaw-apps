@@ -6,7 +6,7 @@ routed through a bounded NuttX event queue, sent to DeepSeek through the
 OpenAI-compatible chat/completions API, optionally resolved through registered
 tools, and persisted to local JSONL files.
 
-FruitClaw is still in active bring-up.  The target direction is a practical
+FruitClaw is still in active development.  The target direction is a practical
 owner-operated board agent that can be reached from Telegram and, now, from a
 local MCP client.  The unfinished work is hardware validation and polish, not a
 change in direction: Telegram, DeepSeek tool calling, Berry scripts, schedules,
@@ -37,7 +37,7 @@ kconfig-tweak --file .config --enable FRUITCLAW_WIFI_AUTOSTART
 kconfig-tweak --file .config --enable FRUITCLAW_MCP_SERVER
 kconfig-tweak --file .config --enable FRUITCLAW_MCP_YOLO_MODE
 kconfig-tweak --file .config --disable NETUTILS_HTTPD_SINGLECONNECT
-kconfig-tweak --file .config --enable FRUITCLAW_GUARD_BOOTSEL_RECOVERY
+kconfig-tweak --file .config --disable FRUITCLAW_GUARD_BOOTSEL_RECOVERY
 kconfig-tweak --file .config --set-val FRUITCLAW_GUARD_ACQUIRE_TIMEOUT_MS 5000
 kconfig-tweak --file .config --set-val FRUITCLAW_TELEGRAM_POLL_TIMEOUT_SEC 0
 kconfig-tweak --file .config --set-val FRUITCLAW_TELEGRAM_POLL_IDLE_MS 5000
@@ -51,14 +51,14 @@ kconfig-tweak --file .config --set-val FRUITCLAW_AGENT_GUARD_TIMEOUT_MS 0
 kconfig-tweak --file .config --set-val FRUITCLAW_TELEGRAM_HTTP_TIMEOUT_SEC 8
 kconfig-tweak --file .config --set-val FRUITCLAW_TELEGRAM_HTTP_GUARD_TIMEOUT_MS 0
 kconfig-tweak --file .config --set-val FRUITCLAW_SESSION_GUARD_TIMEOUT_MS 600000
-kconfig-tweak --file .config --set-val FRUITCLAW_MAX_UPTIME_GUARD_MS 600000
+kconfig-tweak --file .config --set-val FRUITCLAW_MAX_UPTIME_GUARD_MS 0
 make olddefconfig
 make -j8
 ```
 
 The current community-oriented `esp-hosted` profile is intended to bring the
 useful board features into one build: FruitClaw, MCP, Telegram, DeepSeek,
-telnet, FTP, uIP webserver/wiki, LVGL, Berry, Berry LVGL bindings, PSRAM user
+telnet, FTP, uIP webserver/docs, LVGL, Berry, Berry LVGL bindings, PSRAM user
 heap, PIO USB host, USB HID keyboard/mouse, Xbox controller support, SD/FAT,
 NeoPixels at `/dev/leds0`, and the Fruit Jam DVI/framebuffer stack selected by
 the board profile.  The operator image deliberately uses the safe 320x240
@@ -167,7 +167,7 @@ echo "<numeric-chat-id>" > /data/fruitclaw/telegram_allowed_chats.txt
 ```
 
 For unattended boot, store Wi-Fi settings in the active data root, not in
-source.  The current bring-up image leaves `FRUITCLAW_WIFI_CONFIG_PATH` empty
+source.  The current production profile leaves `FRUITCLAW_WIFI_CONFIG_PATH` empty
 and reads the data-root leaf `wifi.conf`:
 
 ```sh
@@ -278,14 +278,11 @@ and `schedule_add()`.
 The direct Berry VM wrapper is enabled by
 `CONFIG_FRUITCLAW_BERRY_EXPERIMENTAL_RUNNER`.  The VM runs on a dedicated
 Berry-sized worker stack and is wrapped by the short FruitClaw watchdog guard,
-so a wedged script resets the board instead of leaving it stuck.  In the normal
-operator/community profile that reset boots back into the application; only a
-temporary bring-up profile with `CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y`
-converts the reset into ROM BOOTSEL.  Tools called through the `claw` binding
-reuse that outer Berry guard instead of trying to acquire a nested watchdog
-guard.  This lets Berry scripts schedule jobs, run bounded terminal commands,
-or drive NeoPixels while the whole script remains covered by one recovery
-guard.
+so a wedged script resets the board back into the application instead of
+leaving it stuck.  Tools called through the `claw` binding reuse that outer
+Berry guard instead of trying to acquire a nested watchdog guard.  This lets
+Berry scripts schedule jobs, run bounded terminal commands, or drive NeoPixels
+while the whole script remains covered by one recovery guard.
 
 Example script:
 
@@ -304,10 +301,10 @@ Berry/LVGL integration is still bring-up work.
 ## Recovery Model
 
 The most important rule is that a failed unattended run must recover without a
-human pressing reset.  The normal operator/community image does that with
-watchdog resets back into the application.  ROM BOOTSEL recovery is still
-available, but it is an explicit bring-up setting for reflash-heavy test runs,
-not the default runtime personality.
+human pressing reset.  The production operator image does that with watchdog
+resets back into the application.  ROM BOOTSEL remains available through the
+manual `bootsel` command for flashing, but it is not the automatic failure
+target.
 
 When `CONFIG_FRUITCLAW_ENABLE_EXEC_GUARD=y`, risky owner operations arm the
 RP23xx watchdog before they run.  Berry scripts, captured terminal commands,
@@ -315,11 +312,10 @@ script/note file writes, scheduler mutation, NeoPixels, `/dev` writes, LLM
 calls, HTTP paths, and MCP owner calls therefore cannot wedge the board
 forever.  If the operation does not unwind, the watchdog resets the board.
 
-`CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y` changes only the recovery target:
-FruitClaw writes the Fruit Jam bootguard scratch words before guarded
-watchdog paths, so the reset lands in ROM BOOTSEL for reflashing.  Leave it
-disabled for release-style images.  Enable it only when the operator wants a
-temporary bring-up image that can be reflashed automatically after a failure.
+`CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY` is disabled in the production
+profile. FruitClaw does not write the Fruit Jam bootguard scratch words before
+guarded watchdog paths, so a wedged owner operation resets back into NuttX and
+FruitClaw autostarts again.
 
 When `CONFIG_FRUITCLAW_ENABLE_SESSION_GUARD=y`, `fruitclaw start` also starts a
 continuous progress watchdog.  Workers heartbeat from the runtime loop, agent,
@@ -339,16 +335,16 @@ SD data-root creation does not false-trip the short 12 second tool watchdog.
 `fruitclaw wifi-up` uses the operator/HTTP/CLI guard timeout directly; it must
 not be stretched to the full session timeout, because a wedged ESP-hosted
 association or DHCP command would otherwise leave CDC and MCP stale for the
-whole unattended BOOTSEL fuse window.
+whole operator recovery window.
 
 Only one short/long risky-operation guard may own the RP2350 watchdog at a
 time.  If a Berry/terminal/device/MCP path is already guarded, a second risky
 guard waits only up to `CONFIG_FRUITCLAW_GUARD_ACQUIRE_TIMEOUT_MS` before it
 returns a busy error instead of stealing or disarming the active watchdog.  The
-bring-up value is short on purpose: foreground MCP should fail fast behind a
+interactive value is short on purpose: foreground MCP should fail fast behind a
 background Telegram notification rather than look hung to Hermes or Codex.
 
-The Fruit Jam bring-up profile leaves the full-turn agent guard disabled with
+The Fruit Jam profile leaves the full-turn agent guard disabled with
 `CONFIG_FRUITCLAW_AGENT_GUARD_TIMEOUT_MS=0`.  That is intentional: when the
 outer agent guard owns the watchdog, the narrower DeepSeek and Telegram guards
 are same-thread re-entrant no-ops.  For this profile, responsiveness matters
@@ -364,10 +360,10 @@ the board merely because they are waiting behind another normal HTTPS request.
 If the actual HTTP/TLS operation wedges after it owns the lane, the long guard
 uses an immediate watchdog trigger with the FruitClaw stage word recorded.
 
-The unattended Fruit Jam bring-up profile sets
+The Fruit Jam production profile sets
 `CONFIG_FRUITCLAW_TELEGRAM_HTTP_TIMEOUT_SEC=8` and
 `CONFIG_FRUITCLAW_TELEGRAM_HTTP_GUARD_TIMEOUT_MS=0` for Telegram polls and
-sends.  Telegram is frequent background traffic, so this bring-up profile uses
+sends.  Telegram is frequent background traffic, so this profile uses
 short-poll mode, a short webclient timeout, and an isolated unlocked HTTP path
 instead of letting a Telegram HTTPS problem own the global HTTP guard.  A
 half-up Telegram transport is treated as degraded and logged; it should not
@@ -380,7 +376,7 @@ The Telegram poller deliberately uses short-poll mode
 (`CONFIG_FRUITCLAW_TELEGRAM_POLL_TIMEOUT_SEC=0`) plus
 `CONFIG_FRUITCLAW_TELEGRAM_POLL_IDLE_MS=5000` between successful polls, so
 Telegram does not hold the HTTP lane open long enough to starve MCP.  In the
-current bring-up profile, Telegram waits 30 seconds after runtime start and
+current profile, Telegram waits 30 seconds after runtime start and
 recent MCP activity makes the Telegram poller yield until the board has been
 MCP-idle for 60 seconds, capped at 5 seconds for each notification batch.  This
 keeps MCP and the webserver responsive during long Hermes/Codex test runs
@@ -412,14 +408,16 @@ If recovery runs longer than the operator recovery budget, the operator guard
 records `FCNR` and hands off to the configured watchdog recovery target instead
 of leaving the board half-alive with MCP unreachable.
 
-This unattended bring-up profile sets
-`CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=600000` and
-`CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y`.  The session progress watchdog
-and per-operation guards recover real stalls, and the max-uptime fuse is the
-blunt fallback: after about 10 minutes it forces a watchdog recovery into ROM
-BOOTSEL so the board is flashable without pressing reset.  Release-style images
-should set the max-uptime guard to `0` and disable BOOTSEL recovery so
-watchdog resets boot back into the application.
+This production profile sets:
+
+```text
+CONFIG_FRUITCLAW_MAX_UPTIME_GUARD_MS=0
+# CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY is not set
+```
+
+The session progress watchdog and per-operation guards recover real stalls.
+There is no timed max-uptime reset, and guarded hangs reset back into the
+application instead of ROM BOOTSEL.
 
 Use this before long hardware runs:
 
@@ -460,7 +458,7 @@ apps/system/fruitclaw/tools/fruitclaw_soak.py \
   --duration-sec 0 \
   --interval-sec 60 \
   --require-serial \
-  --check-wiki \
+  --check-docs \
   --min-mcp-tools 20 \
   --scheduler-smoke \
   --reset-smoke \
@@ -473,7 +471,7 @@ apps/system/fruitclaw/tools/fruitclaw_soak.py \
 ```
 
 The harness treats progress as proven only when MCP `/mcp` answers, MCP
-`tools/list` exposes the expected tool surface, the static wiki root answers,
+`tools/list` exposes the expected tool surface, the static docs root answers,
 a one-shot schedule can be added, fired, routed through the agent, and removed,
 a persistent marker survives a controlled `fruitclaw reboot`, MCP and CDC come
 back after that reboot, the data root is still the configured FruitClaw root,
@@ -589,7 +587,7 @@ The FruitClaw profile keeps the uIP webserver bounded with
 `CONFIG_NETUTILS_HTTPD_TIMEOUT=10`.  FruitClaw also applies that timeout to
 accepted socket receive and send paths, because a single idle or slow HTTP
 client must not monopolize the small embedded webserver and starve MCP or the
-wiki.  Telegram gets a separate first-success grace window before network
+docs.  Telegram gets a separate first-success grace window before network
 recovery is attempted, so early Telegram HTTPS/backoff during boot does not
 tear down Wi-Fi while MCP is coming online.
 
@@ -615,7 +613,7 @@ curl -i http://DEVICE_IP/mcp \
 
 `GET /mcp` returns `405` with `Allow: POST, OPTIONS`.  `OPTIONS /mcp` returns a
 no-body allow response.  There is no WebSocket or SSE server in this slice.
-The Fruit Jam bring-up image sets a small HTTP receive timeout so one stalled
+The Fruit Jam operator profile sets a small HTTP receive timeout so one stalled
 client cannot monopolize a webserver worker indefinitely, and keeps the MCP
 POST body limit at 16 KiB for larger tool arguments.
 
@@ -639,9 +637,8 @@ POST body limit at 16 KiB for larger tool arguments.
 - Tool loops stop at `CONFIG_FRUITCLAW_MAX_TOOL_ITERATIONS`.
 - Risky local execution paths such as Berry scripts, captured terminal
   commands, and long LLM calls are wrapped by the RP23xx watchdog guard when
-  `CONFIG_FRUITCLAW_ENABLE_EXEC_GUARD=y`.  A wedged operation resets the board
-  to the configured target: normally back into the app, or ROM BOOTSEL only
-  when `CONFIG_FRUITCLAW_GUARD_BOOTSEL_RECOVERY=y`.
+  `CONFIG_FRUITCLAW_ENABLE_EXEC_GUARD=y`.  In this production profile, a
+  wedged operation resets the board back into the app.
   `fruitclaw guard-test` intentionally trips this path.
 - Secrets remain unreadable to tools even in owner mode.
 
@@ -661,7 +658,5 @@ POST body limit at 16 KiB for larger tool arguments.
 - GPIO tools are stubs.
 - HTTPS needs a CA bundle unless the explicit unverified-TLS bring-up option is
   enabled.
-- The max-uptime reset fuse is a temporary bring-up setting.  It is useful for
-  bounded recovery-window tests, but it is disabled in the normal Fruit Jam
-  `esp-hosted` profile so it does not interrupt healthy MCP/Telegram sessions.
-  It reaches ROM BOOTSEL only when BOOTSEL conversion is explicitly enabled.
+- The max-uptime reset fuse is disabled in the Fruit Jam `esp-hosted`
+  production profile so it does not interrupt healthy MCP/Telegram sessions.

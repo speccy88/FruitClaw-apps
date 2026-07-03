@@ -2,6 +2,8 @@
 - [Getting Started](#/quickstart)
 - [Complete Guide](#/guide)
 - [Features](#/features)
+- [Utilities](#/utilities)
+- [Kernel And Devices](#/devices)
 - [Tools](#/tools)
 - [Examples](#/examples)
 - [Build](#/build)

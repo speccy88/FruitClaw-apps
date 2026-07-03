@@ -139,7 +139,7 @@ def update_device_ip(args: argparse.Namespace, ip: str, reason: str) -> bool:
         changed = changed or old_mcp_url != args.mcp_url
 
     if changed:
-        setattr(args, "_wiki_checked", False)
+        setattr(args, "_docs_checked", False)
         setattr(args, "_mcp_tools_checked", False)
         log_event(args, "device_ip_updated", old_ip=old_ip, new_ip=ip,
                   old_mcp_url=old_mcp_url, new_mcp_url=args.mcp_url,
@@ -220,33 +220,38 @@ def http_get_text(url: str, timeout: float) -> tuple[int, str]:
         return int(resp.status), data
 
 
-def check_static_wiki(args: argparse.Namespace) -> tuple[bool, str]:
+def check_static_docs(args: argparse.Namespace) -> tuple[bool, str]:
     base = f"http://{args.device_ip}"
 
     try:
         status, html = http_get_text(f"{base}/index.html",
                                      args.command_timeout)
         if status != 200 or (
-            "FruitClaw Manual" not in html and "FruitClaw Wiki" not in html
+            "Open Documentation" not in html or "/site/home.md" not in html
         ):
-            return False, f"index.html wiki check failed: http={status}"
+            return False, f"index.html docs check failed: http={status}"
 
-        status, raw_index = http_get_text(f"{base}/wiki/index.json",
+        status, docs_html = http_get_text(f"{base}/doc/index.html",
+                                          args.command_timeout)
+        if status != 200 or "FruitClaw Manual" not in docs_html:
+            return False, f"doc/index.html returned http={status}"
+
+        status, raw_index = http_get_text(f"{base}/doc/index.json",
                                           args.command_timeout)
         if status != 200:
-            return False, f"wiki/index.json returned http={status}"
+            return False, f"doc/index.json returned http={status}"
 
         index = json.loads(raw_index)
         pages = index.get("pages")
         if not isinstance(pages, list) or not pages:
-            return False, "wiki/index.json has no pages"
+            return False, "doc/index.json has no pages"
 
         slugs = {page.get("slug") for page in pages if isinstance(page, dict)}
         if not {"home", "tools"}.issubset(slugs):
-            return False, f"wiki page set incomplete: {sorted(slugs)}"
+            return False, f"docs page set incomplete: {sorted(slugs)}"
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError,
             http.client.IncompleteRead, OSError) as exc:
-        return False, f"static wiki check failed: {type(exc).__name__}: {exc}"
+        return False, f"static docs check failed: {type(exc).__name__}: {exc}"
 
     return True, "ok"
 
@@ -1735,24 +1740,24 @@ def check_once(args: argparse.Namespace, iteration: int) -> tuple[bool, str]:
                 return True, failure
             return False, failure
 
-    if args.check_wiki and not getattr(args, "_wiki_checked", False):
-        ok, reason = check_static_wiki(args)
+    if args.check_docs and not getattr(args, "_docs_checked", False):
+        ok, reason = check_static_docs(args)
         if not ok:
             refreshed, refresh_reason = refresh_mcp_endpoint(
-                args, f"check-{iteration}-wiki"
+                args, f"check-{iteration}-docs"
             )
             if not refreshed:
                 failure = f"{reason}; refresh={refresh_reason}"
-                if tolerate_mcp_health_failure(args, "wiki", failure):
+                if tolerate_mcp_health_failure(args, "docs", failure):
                     return True, failure
                 return False, failure
-            ok, reason = check_static_wiki(args)
+            ok, reason = check_static_docs(args)
             if not ok:
-                if tolerate_mcp_health_failure(args, "wiki", reason):
+                if tolerate_mcp_health_failure(args, "docs", reason):
                     return True, reason
                 return False, reason
-        setattr(args, "_wiki_checked", True)
-        log_event(args, "wiki_check_ok")
+        setattr(args, "_docs_checked", True)
+        log_event(args, "docs_check_ok")
 
     tools_count = getattr(args, "_mcp_tools_list_count", 0)
     if args.min_mcp_tools > 0:
@@ -2200,8 +2205,8 @@ def maybe_flash(args: argparse.Namespace) -> bool:
 def missing_requested_smokes(args: argparse.Namespace) -> list[str]:
     missing: list[str] = []
 
-    if args.check_wiki and not getattr(args, "_wiki_checked", False):
-        missing.append("wiki")
+    if args.check_docs and not getattr(args, "_docs_checked", False):
+        missing.append("docs")
     if args.min_mcp_tools > 0 and not getattr(args, "_mcp_tools_checked",
                                                False):
         missing.append("mcp-tools")
@@ -2311,9 +2316,10 @@ def main() -> int:
     parser.add_argument("--min-mcp-tools", type=int, default=0,
                         help="fail if MCP tools/list returns fewer tools; "
                         "0 disables this check")
-    parser.add_argument("--check-wiki", action="store_true",
+    parser.add_argument("--check-docs", "--check-wiki", dest="check_docs",
+                        action="store_true",
                         help="also verify static GET /index.html and "
-                        "/wiki/index.json")
+                        "/doc/index.json")
     parser.add_argument("--scheduler-smoke", action="store_true",
                         help="once per run, add a short one-shot schedule, "
                         "wait for it to fire, then remove it")

@@ -11,7 +11,7 @@
 
 #include "netutils/cJSON.h"
 
-#define FC_MAX_CAPS 32
+#define FC_MAX_CAPS 48
 
 static const fc_cap_t *g_caps[FC_MAX_CAPS];
 static pthread_mutex_t g_cap_init_lock = PTHREAD_MUTEX_INITIALIZER;

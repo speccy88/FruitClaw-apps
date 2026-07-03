@@ -34,6 +34,10 @@
 #  define FC_NEOPIXEL_COUNT 5
 #endif
 
+#ifndef CONFIG_FRUITCLAW_WEB_HOME_MAX_BYTES
+#  define CONFIG_FRUITCLAW_WEB_HOME_MAX_BYTES 4096
+#endif
+
 #define FC_TOOL_TEXT_MAX        2048
 #define FC_DEVICE_MAX_IO        256
 #define FC_SCRIPT_DESC_MAX      192
@@ -828,6 +832,116 @@ static int cap_file_write_limited(const fc_tool_context_t *ctx,
   snprintf(out, out_len, ret == 0 ?
            "{\"ok\":true}" :
            "{\"ok\":false,\"error\":\"write failed\"}");
+  return ret;
+}
+
+static int cap_web_home_read(const fc_tool_context_t *ctx,
+                             const char *args_json, char *out,
+                             size_t out_len)
+{
+  char *buf;
+  char *esc;
+  bool custom = false;
+  int ret;
+
+  (void)ctx;
+  (void)args_json;
+
+  buf = calloc(1, CONFIG_FRUITCLAW_WEB_HOME_MAX_BYTES + 1);
+  esc = calloc(1, CONFIG_FRUITCLAW_WEB_HOME_MAX_BYTES * 6 + 1);
+  if (buf == NULL || esc == NULL)
+    {
+      free(buf);
+      free(esc);
+      return -ENOMEM;
+    }
+
+  ret = fc_web_home_read(buf, CONFIG_FRUITCLAW_WEB_HOME_MAX_BYTES + 1,
+                         &custom);
+  if (ret == 0)
+    {
+      fc_json_escape(buf, esc, CONFIG_FRUITCLAW_WEB_HOME_MAX_BYTES * 6 + 1);
+      snprintf(out, out_len,
+               "{\"ok\":true,\"custom\":%s,\"path\":\"www/home.md\","
+               "\"url\":\"/\",\"markdown\":\"%s\"}",
+               custom ? "true" : "false", esc);
+    }
+  else
+    {
+      snprintf(out, out_len, "{\"ok\":false,\"error\":\"home read failed\"}");
+    }
+
+  free(buf);
+  free(esc);
+  return ret;
+}
+
+static int cap_web_home_write(const fc_tool_context_t *ctx,
+                              const char *args_json, char *out,
+                              size_t out_len)
+{
+  cJSON *root = cJSON_Parse(args_json ? args_json : "{}");
+  const char *markdown;
+  int guard_fd = -1;
+  int ret;
+
+  if (!fc_ctx_owner(ctx))
+    {
+      snprintf(out, out_len, "{\"ok\":false,\"error\":\"owner required\"}");
+      return -EACCES;
+    }
+
+  if (root == NULL)
+    {
+      return fc_json_out_error(out, out_len, "invalid JSON");
+    }
+
+  markdown = cJSON_GetStringValue(cJSON_GetObjectItem(root, "markdown"));
+  if (markdown == NULL)
+    {
+      markdown = cJSON_GetStringValue(cJSON_GetObjectItem(root, "text"));
+    }
+
+  if (markdown == NULL)
+    {
+      cJSON_Delete(root);
+      return fc_json_out_error(out, out_len, "missing markdown");
+    }
+
+  ret = fc_tool_guard_arm(ctx, FC_GUARD_STAGE_FILE, &guard_fd);
+  if (ret < 0)
+    {
+      cJSON_Delete(root);
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"web home guard unavailable\","
+               "\"code\":%d}", ret);
+      return ret;
+    }
+
+  ret = fc_web_home_write(markdown);
+  fc_guard_disarm(guard_fd);
+  cJSON_Delete(root);
+
+  if (ret == 0)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":true,\"path\":\"www/home.md\",\"url\":\"/\","
+               "\"bytes\":%u}", (unsigned int)strlen(markdown));
+    }
+  else if (ret == -EFBIG)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"home markdown too large\","
+               "\"max_bytes\":%u}",
+               (unsigned int)CONFIG_FRUITCLAW_WEB_HOME_MAX_BYTES);
+    }
+  else
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"home write failed\","
+               "\"code\":%d}", ret);
+    }
+
   return ret;
 }
 
@@ -3305,6 +3419,22 @@ static const fc_cap_t g_caps[] =
     "\"text\":{\"type\":\"string\"}},\"required\":[\"path\",\"text\"],"
     "\"additionalProperties\":false}",
     true, true, cap_file_write_limited
+  },
+  {
+    "web.home.read", "Read web home page",
+    "Read the Markdown body rendered by the root web page. Custom content "
+    "lives at www/home.md under the active FruitClaw data root.",
+    "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
+    true, false, cap_web_home_read
+  },
+  {
+    "web.home.write", "Write web home page",
+    "Replace the Markdown body rendered by the root web page and served "
+    "through /site/home.md. The static root shell links to /doc/ for the "
+    "manual.",
+    "{\"type\":\"object\",\"properties\":{\"markdown\":{\"type\":\"string\"},"
+    "\"text\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+    true, true, cap_web_home_write
   },
   {
     "script.list", "List generated scripts",

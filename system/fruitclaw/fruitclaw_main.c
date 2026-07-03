@@ -865,6 +865,16 @@ static int fc_bootstrap(void)
 
   fc_bootstrap_set_stage("scheduler-load", 0);
   fc_scheduler_load();
+
+  fc_bootstrap_set_stage("web-register", 0);
+  ret = fc_web_register_http();
+  if (ret < 0)
+    {
+      fc_bootstrap_set_stage("web-register-failed", ret);
+      printf("web register failed: %d\n", ret);
+      goto out;
+    }
+
 #ifdef CONFIG_FRUITCLAW_MCP_SERVER
   fc_bootstrap_set_stage("mcp-register", 0);
   ret = fc_mcp_register_http();
