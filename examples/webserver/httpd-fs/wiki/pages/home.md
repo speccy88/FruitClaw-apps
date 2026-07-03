@@ -26,8 +26,8 @@ development image. It currently includes:
 - DeepSeek OpenAI-compatible chat/completions calls.
 - Tool calling through one native capability registry.
 - Telnet server on port 23 and FTP server on port 21.
-- Unattended data root at `/data/fruitclaw` for the current bring-up image, so
-  boot and diagnostics do not block on SD probing.
+- Data root that prefers `/mnt/sd0/fruitclaw` when SD is mounted and writable,
+  with `/data/fruitclaw` fallback so SD cannot block serial/MCP recovery.
 - Berry interpreter and constrained FruitClaw Berry runner.
 - LVGL and Berry LVGL bindings.
 - DVI framebuffer at `/dev/fb0`.
@@ -55,33 +55,23 @@ Check the live address with `ifconfig wlan0` from the NuttX shell.
 
 ## Important Runtime Files
 
-The current unattended profile uses volatile tmpfs by default:
-
-```text
-/data/fruitclaw
-```
-
-This keeps serial, Telnet, MCP, and watchdog recovery responsive even when SD
-is absent or unhealthy.
-
-FruitClaw also has an opt-in SD data-root mode.  When
-`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y`, the board has mounted SD, and the
-ready marker exists, the active root can become:
+The current profile prefers SD when it is already mounted and writable:
 
 ```text
 /mnt/sd0/fruitclaw
 /mnt/sd0/fruitclaw/.fruitclaw-ready
 ```
 
-If that option is disabled or the marker is absent, FruitClaw uses:
+If SD is absent or unhealthy, FruitClaw falls back to volatile tmpfs:
 
 ```text
 /data/fruitclaw
 ```
 
-FruitClaw does not try to mount SD or create SD directories from the operator
-command path; board bring-up owns `/dev/mmcsd0` and `/mnt/sd0` so a bad card
-does not block MCP, Telegram, Telnet, or serial diagnostics.
+This keeps serial, Telnet, MCP, and watchdog recovery responsive even when SD
+is absent or unhealthy. FruitClaw creates the SD data directory and ready
+marker only when the mounted SD path is writable; it does not block boot trying
+to mount media.
 
 Important files under the data root:
 

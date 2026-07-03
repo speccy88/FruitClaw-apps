@@ -69,39 +69,25 @@ not include the separate TRMNL display client or switch `/dev/fb0` to the
 800x480 Y2 TRMNL framebuffer.  Use `fruitclaw config`, `fruitclaw status`, and
 `fruitclaw tools` on the board to see what the running image actually compiled.
 
-The current unattended Fruit Jam `esp-hosted` profile uses the volatile tmpfs
-fallback root by default:
-
-```text
-/data/fruitclaw
-```
-
-This is deliberate for bring-up: boot, serial, Telnet, MCP, and watchdog
-recovery must not block on SD card probing.  A future storage command should
-prepare persistent SD explicitly, under a guard, after the shell is already
-responsive.
-
-The code also supports an opt-in SD data root when
-`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y`, the board-level SD bring-up has
-already mounted the card, and the FruitClaw ready marker exists:
+The current Fruit Jam `esp-hosted` profile enables
+`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y`.  On first use, FruitClaw prefers SD
+only when the board-level SD path is already mounted and writable:
 
 ```text
 /mnt/sd0/fruitclaw
 /mnt/sd0/fruitclaw/.fruitclaw-ready
 ```
 
-If that option is disabled or the marker is missing, FruitClaw uses:
+If SD is missing or not writable, FruitClaw falls back to volatile tmpfs:
 
 ```text
 /data/fruitclaw
 ```
 
-FruitClaw only chooses between the visible roots; it does not perform a blocking
-SD mount attempt and it does not create SD subdirectories during boot.  The
-RP23xx board bring-up owns `/dev/mmcsd0` registration and `/mnt/sd0` mounting
-so an unhealthy SD card cannot wedge the operator shell while FruitClaw is
-answering commands.  Create the marker only after `/mnt/sd0` has been proven
-healthy for your board/card.
+FruitClaw only chooses between visible roots; it does not perform a blocking SD
+mount attempt during boot.  The RP23xx board bring-up owns `/dev/mmcsd0`
+registration and `/mnt/sd0` mounting so an unhealthy SD card cannot wedge the
+operator shell while FruitClaw is answering commands.
 
 Generic `device.read` and `device.write` calls intentionally reject block
 devices such as `/dev/mmcsd0`, `/dev/ram*`, `/dev/mtd*`, and any path that
@@ -124,7 +110,8 @@ without certificate verification.  Leave it disabled for normal use.
 ## Runtime Files
 
 FruitClaw creates this layout under the active data root if it is missing.  In
-the current unattended `esp-hosted` image, the active root is `/data/fruitclaw`.
+this `esp-hosted` image, the active root is `/mnt/sd0/fruitclaw` when SD is
+mounted and writable, otherwise `/data/fruitclaw`.
 
 ```text
 <active-fruitclaw-data-root>/

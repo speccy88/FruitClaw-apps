@@ -22,7 +22,7 @@ CONFIG_FRUITCLAW_WIFI_AUTOSTART=y
 CONFIG_FRUITCLAW_TLS_ALLOW_UNVERIFIED=y
 CONFIG_FRUITCLAW_MCP_SERVER=y
 CONFIG_FRUITCLAW_MCP_YOLO_MODE=y
-CONFIG_FRUITCLAW_MCP_MAX_RESPONSE=16384
+CONFIG_FRUITCLAW_MCP_MAX_RESPONSE=32768
 CONFIG_FRUITCLAW_MCP_TOOL_TIMEOUT_MS=30000
 ```
 
@@ -49,7 +49,7 @@ CONFIG_EXAMPLES_WEBSERVER=y
 CONFIG_NETUTILS_HTTPD_CGIPATH=y
 CONFIG_NETUTILS_HTTPD_POST=y
 CONFIG_NETUTILS_HTTPD_MAX_BODY=16384
-CONFIG_NETUTILS_HTTPD_TIMEOUT=3
+CONFIG_NETUTILS_HTTPD_TIMEOUT=10
 CONFIG_NETUTILS_HTTPD_KEEPALIVE_DISABLE=y
 CONFIG_NETUTILS_WEBCLIENT=y
 CONFIG_NETUTILS_FTPD=y
@@ -87,26 +87,18 @@ CONFIG_FS_TMPFS=y
 CONFIG_FSUTILS_MKFATFS=y
 ```
 
-Current unattended FruitClaw data root:
-
-```text
-/data/fruitclaw
-```
-
-The build keeps SD out of the automatic boot path so recovery and diagnostics
-stay responsive.  The code can be configured to prefer SD after explicit
-storage preparation, using:
+FruitClaw data-root selection in this profile:
 
 ```text
 /mnt/sd0/fruitclaw
 /mnt/sd0/fruitclaw/.fruitclaw-ready
-```
-
-Fallback if SD preference is disabled or not ready:
-
-```text
 /data/fruitclaw
 ```
+
+`CONFIG_FRUITCLAW_PREFER_SD_DATA_DIR=y` is enabled. If `/mnt/sd0` is mounted
+and writable, FruitClaw creates/uses `/mnt/sd0/fruitclaw` and its ready marker.
+If SD is missing or not writable, it falls back to `/data/fruitclaw` so serial,
+Telnet, MCP, and watchdog diagnostics still come up.
 
 ## Shell And Local Apps
 

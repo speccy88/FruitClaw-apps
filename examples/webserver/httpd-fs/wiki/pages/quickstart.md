@@ -42,9 +42,9 @@ The web manual is served by the board on port 80.
 
 ## 3. Enter Local Runtime Config
 
-The current unattended profile uses `/data/fruitclaw` so boot and diagnostics
-stay responsive even when SD is absent or unhealthy.  Enter Wi-Fi and API
-secrets from NSH:
+FruitClaw stores runtime files under the active data root. The current profile
+prefers `/mnt/sd0/fruitclaw` when SD is mounted and writable, and falls back to
+`/data/fruitclaw` when SD is absent. Enter Wi-Fi and API secrets from NSH:
 
 ```sh
 fruitclaw config set-wifi
