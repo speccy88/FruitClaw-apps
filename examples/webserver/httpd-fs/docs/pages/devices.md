@@ -99,7 +99,9 @@ ESP-Hosted-MCU. In this release:
 
 - ESP32-C6 handles Wi-Fi radio work.
 - NuttX owns DHCP, DNS, sockets, Telnet, FTP, HTTP, MCP, NTP, and outbound TLS.
-- FruitClaw Wi-Fi setup reads `wifi.conf` from the active data root.
+- FruitClaw Wi-Fi setup reads `wifi.conf` from the explicit Kconfig path when
+  set, then the active data root, then `/mnt/sd0/fruitclaw`, then
+  `/data/fruitclaw`.
 
 Useful checks:
 

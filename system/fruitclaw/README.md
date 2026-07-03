@@ -166,9 +166,10 @@ cat /data/fruitclaw/telegram_allowed_chats.txt
 echo "<numeric-chat-id>" > /data/fruitclaw/telegram_allowed_chats.txt
 ```
 
-For unattended boot, store Wi-Fi settings in the active data root, not in
-source.  The current production profile leaves `FRUITCLAW_WIFI_CONFIG_PATH` empty
-and reads the data-root leaf `wifi.conf`:
+For unattended boot, store Wi-Fi settings in runtime storage, not in source.
+The current production profile leaves `FRUITCLAW_WIFI_CONFIG_PATH` empty and
+reads `wifi.conf` from the active data root first, then
+`/mnt/sd0/fruitclaw/wifi.conf`, then `/data/fruitclaw/wifi.conf`:
 
 ```sh
 fruitclaw config set-wifi
@@ -292,10 +293,19 @@ claw.reply(claw.terminal_run("uname -a"))
 ```
 
 That can be written through MCP with `file.write_limited` under
-`scripts/example.be`, then run with `berry.run_script`.  As of the current
-hardware slice, `fruitclaw berry-smoke`, `fruitclaw selftest`, MCP
-`berry.run_script`, `import claw`, and a Berry script calling back into
-`terminal.run` have been verified on the Fruit Jam RP2350.  More complex
+`scripts/example.be`, then run with `berry.run_script`.
+
+Generated script tools use `scripts/generated/` and add a tighter workflow:
+`script.write`, `script.read`, `script.validate`, `script.run`, and
+`script.schedule` support Berry `.be` scripts and NSH `.nsh` scripts.  A
+scheduled generated script fires `script.run` directly, so the scheduler does
+not need another LLM turn to run the script.
+
+As of the current hardware slice, `fruitclaw berry-smoke`,
+`fruitclaw selftest`, MCP `berry.run_script`, `import claw`, and a Berry script
+calling back into `terminal.run` have been verified on the Fruit Jam RP2350.
+The generated `script.run` path is a source-level hardening addition for the
+next image and still needs the same hardware smoke test. More complex
 Berry/LVGL integration is still bring-up work.
 
 ## Recovery Model
@@ -556,8 +566,8 @@ This endpoint is intentionally YOLO mode during bring-up:
 
 MCP reuses the existing `fc_cap` registry.  Tool names are native FruitClaw dot
 names such as `time.now`, `system.status`, `service.status`,
-`service.control`, `terminal.run`, `berry.run_script`, `scheduler.add`,
-`device.list`, and `neopixels.set`.  DeepSeek still receives the
+`service.control`, `terminal.run`, `berry.run_script`, `script.run`,
+`scheduler.add`, `device.list`, and `neopixels.set`. DeepSeek still receives the
 OpenAI-compatible underscore mapping internally.
 
 Start the runtime:

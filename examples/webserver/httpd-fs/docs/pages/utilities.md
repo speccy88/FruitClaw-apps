@@ -50,7 +50,7 @@ Compiled network/user-space utilities include:
 | `ntpc` | NTP client. |
 | `telnetd` | NuttX Telnet NSH service on port 23. |
 | `ftpd_start` / `ftpd_stop` | FTP daemon lifecycle commands. |
-| `webserver` | uIP webserver serving `/`, `/doc/`, `/site/home.md`, and `/mcp`. |
+| `webserver` | uIP webserver serving `/`, `/docs/`, `/site/home.md`, and `/mcp`; `/doc/` redirects to `/docs/`. |
 | `mqttc` | MQTT-C example support. |
 | `esphostedctl` | ESP-Hosted control/diagnostic utility. |
 

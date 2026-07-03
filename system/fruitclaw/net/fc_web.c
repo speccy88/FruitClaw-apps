@@ -20,7 +20,7 @@
 static const char g_default_home[] =
   "# FruitClaw\n\n"
   "FruitClaw is running on this Adafruit Fruit Jam RP2350.\n\n"
-  "- Open `/doc/` for the full manual.\n"
+  "- Open `/docs/` for the full manual.\n"
   "- Use MCP at `/mcp` for tool calls.\n"
   "- Update this page with the `web.home.write` tool or by editing "
   "`www/home.md` under the active FruitClaw data root.\n";

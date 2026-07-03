@@ -31,6 +31,8 @@
 #define FC_WIFI_SSID_LEN 64
 #define FC_WIFI_PSK_LEN 96
 #define FC_WIFI_REAPPLY_SUPPRESS_MS 300000
+#define FC_SERVICE_BOOT_RETRIES 3
+#define FC_SERVICE_BOOT_RETRY_DELAY_SEC 3
 #define FC_SERVICE_PROBE_FAILURE_LIMIT 3
 #define FC_SERVICE_ACTIVE_TCP_PROBES 0
 
@@ -386,6 +388,29 @@ static int wifi_read_config_path(const char *path, char *ssid,
   return ssid[0] == '\0' ? -ENOENT : 0;
 }
 
+static int wifi_try_config_path(const char *path, char *ssid,
+                                size_t ssid_len, char *psk,
+                                size_t psk_len, int *key_mgmt,
+                                int *cipher, char *used_path,
+                                size_t used_path_len)
+{
+  int ret;
+
+  if (path == NULL || path[0] == '\0')
+    {
+      return -ENOENT;
+    }
+
+  ret = wifi_read_config_path(path, ssid, ssid_len, psk, psk_len,
+                              key_mgmt, cipher);
+  if (ret == 0 && used_path != NULL && used_path_len > 0)
+    {
+      fc_strlcpy(used_path, path, used_path_len);
+    }
+
+  return ret;
+}
+
 static int wifi_read_config(char *ssid, size_t ssid_len, char *psk,
                             size_t psk_len, int *key_mgmt, int *cipher,
                             char *used_path, size_t used_path_len)
@@ -395,47 +420,87 @@ static int wifi_read_config(char *ssid, size_t ssid_len, char *psk,
 
   if (CONFIG_FRUITCLAW_WIFI_CONFIG_PATH[0] == '/')
     {
-      ret = wifi_read_config_path(CONFIG_FRUITCLAW_WIFI_CONFIG_PATH,
-                                  ssid, ssid_len, psk, psk_len,
-                                  key_mgmt, cipher);
+      ret = wifi_try_config_path(CONFIG_FRUITCLAW_WIFI_CONFIG_PATH,
+                                 ssid, ssid_len, psk, psk_len,
+                                 key_mgmt, cipher, used_path,
+                                 used_path_len);
       if (ret == 0)
         {
-          fc_strlcpy(used_path, CONFIG_FRUITCLAW_WIFI_CONFIG_PATH,
-                     used_path_len);
           return 0;
         }
     }
 
   ret = fc_data_path(CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF, path, sizeof(path));
-  if (ret < 0)
-    {
-      return ret;
-    }
-
-  ret = wifi_read_config_path(path, ssid, ssid_len, psk, psk_len,
-                              key_mgmt, cipher);
   if (ret == 0)
     {
-      fc_strlcpy(used_path, path, used_path_len);
+      ret = wifi_try_config_path(path, ssid, ssid_len, psk, psk_len,
+                                 key_mgmt, cipher, used_path,
+                                 used_path_len);
+      if (ret == 0)
+        {
+          return 0;
+        }
     }
 
-  return ret;
+  if (snprintf(path, sizeof(path), "%s/%s", CONFIG_FRUITCLAW_SD_DATA_DIR,
+               CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF) < (int)sizeof(path))
+    {
+      ret = wifi_try_config_path(path, ssid, ssid_len, psk, psk_len,
+                                 key_mgmt, cipher, used_path,
+                                 used_path_len);
+      if (ret == 0)
+        {
+          return 0;
+        }
+    }
+
+  if (snprintf(path, sizeof(path), "%s/%s", CONFIG_FRUITCLAW_DATA_DIR,
+               CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF) >= (int)sizeof(path))
+    {
+      return -ENAMETOOLONG;
+    }
+
+  return wifi_try_config_path(path, ssid, ssid_len, psk, psk_len,
+                              key_mgmt, cipher, used_path, used_path_len);
+}
+
+static bool wifi_path_present(const char *path)
+{
+  return path != NULL && path[0] != '\0' && access(path, F_OK) == 0;
 }
 
 static bool wifi_config_present(void)
 {
 #ifdef CONFIG_FRUITCLAW_WIFI_AUTOSTART
   char path[FC_PATH_LEN];
-  int ret;
 
   if (CONFIG_FRUITCLAW_WIFI_CONFIG_PATH[0] == '/' &&
-      access(CONFIG_FRUITCLAW_WIFI_CONFIG_PATH, F_OK) == 0)
+      wifi_path_present(CONFIG_FRUITCLAW_WIFI_CONFIG_PATH))
     {
       return true;
     }
 
-  ret = fc_data_path(CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF, path, sizeof(path));
-  return ret == 0 && access(path, F_OK) == 0;
+  if (fc_data_path(CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF, path,
+                   sizeof(path)) == 0 && wifi_path_present(path))
+    {
+      return true;
+    }
+
+  if (snprintf(path, sizeof(path), "%s/%s", CONFIG_FRUITCLAW_SD_DATA_DIR,
+               CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF) < (int)sizeof(path) &&
+      wifi_path_present(path))
+    {
+      return true;
+    }
+
+  if (snprintf(path, sizeof(path), "%s/%s", CONFIG_FRUITCLAW_DATA_DIR,
+               CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF) < (int)sizeof(path) &&
+      wifi_path_present(path))
+    {
+      return true;
+    }
+
+  return false;
 #else
   return false;
 #endif
@@ -565,11 +630,19 @@ static int cmd_wifi_up_guarded(bool already_guarded)
   if (ret < 0)
     {
       char data_path[FC_PATH_LEN];
+      char sd_path[FC_PATH_LEN];
 
       fc_data_path(CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF, data_path,
                    sizeof(data_path));
-      printf("Wi-Fi config missing at %s or %s\n",
-             CONFIG_FRUITCLAW_WIFI_CONFIG_PATH, data_path);
+      snprintf(sd_path, sizeof(sd_path), "%s/%s",
+               CONFIG_FRUITCLAW_SD_DATA_DIR,
+               CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF);
+      printf("Wi-Fi config missing at explicit=%s active=%s sd=%s "
+             "fallback=%s/%s\n",
+             CONFIG_FRUITCLAW_WIFI_CONFIG_PATH[0] != '\0' ?
+             CONFIG_FRUITCLAW_WIFI_CONFIG_PATH : "(unset)",
+             data_path, sd_path, CONFIG_FRUITCLAW_DATA_DIR,
+             CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF);
       return 1;
     }
 
@@ -741,7 +814,29 @@ static void *fc_boot_network_main(void *arg)
   fc_guard_session_heartbeat("ntpcstart");
 #endif
 
-  fc_boot_services_start();
+  {
+    int attempt;
+    int services_ret = -EIO;
+
+    for (attempt = 1; attempt <= FC_SERVICE_BOOT_RETRIES; attempt++)
+      {
+        services_ret = fc_boot_services_start();
+        if (services_ret == 0)
+          {
+            break;
+          }
+
+        FC_LOGW("boot services attempt %d/%d failed: %d",
+                attempt, FC_SERVICE_BOOT_RETRIES, services_ret);
+        fc_operator_progress_mark("services-retry");
+        fc_guard_session_heartbeat("services-retry");
+        if (attempt < FC_SERVICE_BOOT_RETRIES)
+          {
+            sleep(FC_SERVICE_BOOT_RETRY_DELAY_SEC);
+          }
+      }
+  }
+
   fc_guard_session_heartbeat("services");
 
   pthread_mutex_lock(&g_boot_network_lock);

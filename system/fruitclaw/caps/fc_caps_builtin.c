@@ -47,6 +47,13 @@
 #define FC_SCRIPT_GENERATED_PRE "scripts/generated/"
 #define FC_RTTTL_MAX_TUNE       512
 
+typedef enum fc_script_kind_e
+{
+  FC_SCRIPT_KIND_AUTO = -1,
+  FC_SCRIPT_KIND_BERRY = 0,
+  FC_SCRIPT_KIND_SHELL
+} fc_script_kind_t;
+
 struct fc_color_s
 {
   const char *name;
@@ -975,14 +982,82 @@ static bool fc_script_leaf_ok(const char *leaf)
   return true;
 }
 
-static int fc_script_make_paths(const char *name_or_path, char *leaf,
-                                size_t leaf_len, char *rel,
-                                size_t rel_len, char *full,
-                                size_t full_len)
+static const char *fc_script_kind_name(fc_script_kind_t kind)
+{
+  return kind == FC_SCRIPT_KIND_SHELL ? "shell" : "berry";
+}
+
+static const char *fc_script_kind_ext(fc_script_kind_t kind)
+{
+  return kind == FC_SCRIPT_KIND_SHELL ? ".nsh" : ".be";
+}
+
+static int fc_script_kind_from_arg(const char *kind,
+                                   fc_script_kind_t *out)
+{
+  if (out == NULL)
+    {
+      return -EINVAL;
+    }
+
+  if (kind == NULL || kind[0] == '\0' || strcmp(kind, "auto") == 0)
+    {
+      *out = FC_SCRIPT_KIND_AUTO;
+      return 0;
+    }
+
+  if (strcmp(kind, "berry") == 0 || strcmp(kind, "be") == 0)
+    {
+      *out = FC_SCRIPT_KIND_BERRY;
+      return 0;
+    }
+
+  if (strcmp(kind, "shell") == 0 || strcmp(kind, "nsh") == 0 ||
+      strcmp(kind, "sh") == 0)
+    {
+      *out = FC_SCRIPT_KIND_SHELL;
+      return 0;
+    }
+
+  return -EINVAL;
+}
+
+static int fc_script_kind_from_leaf(const char *leaf,
+                                    fc_script_kind_t *out)
+{
+  size_t len;
+
+  if (leaf == NULL || out == NULL)
+    {
+      return -EINVAL;
+    }
+
+  len = strlen(leaf);
+  if (len >= 3 && strcmp(leaf + len - 3, ".be") == 0)
+    {
+      *out = FC_SCRIPT_KIND_BERRY;
+      return 0;
+    }
+
+  if (len >= 4 && strcmp(leaf + len - 4, ".nsh") == 0)
+    {
+      *out = FC_SCRIPT_KIND_SHELL;
+      return 0;
+    }
+
+  return -EINVAL;
+}
+
+static int fc_script_make_paths_kind(const char *name_or_path,
+                                     fc_script_kind_t requested_kind,
+                                     char *leaf, size_t leaf_len,
+                                     char *rel, size_t rel_len,
+                                     char *full, size_t full_len,
+                                     fc_script_kind_t *kind_out)
 {
   char name[FC_SCRIPT_NAME_MAX + 4];
   const char *src = name_or_path;
-  size_t src_len;
+  fc_script_kind_t found_kind = FC_SCRIPT_KIND_AUTO;
   int ret;
 
   if (name_or_path == NULL || leaf == NULL || rel == NULL || full == NULL)
@@ -1009,14 +1084,26 @@ static int fc_script_make_paths(const char *name_or_path, char *leaf,
       return -EINVAL;
     }
 
-  src_len = strlen(src);
-  if (src_len >= 3 && strcmp(src + src_len - 3, ".be") == 0)
+  if (fc_script_kind_from_leaf(src, &found_kind) == 0)
     {
+      if (requested_kind != FC_SCRIPT_KIND_AUTO &&
+          requested_kind != found_kind)
+        {
+          return -EINVAL;
+        }
+
       ret = fc_strlcpy(name, src, sizeof(name));
     }
   else if (strchr(src, '.') == NULL)
     {
-      ret = snprintf(name, sizeof(name), "%s.be", src) >=
+      if (requested_kind == FC_SCRIPT_KIND_AUTO)
+        {
+          requested_kind = FC_SCRIPT_KIND_BERRY;
+        }
+
+      found_kind = requested_kind;
+      ret = snprintf(name, sizeof(name), "%s%s", src,
+                     fc_script_kind_ext(found_kind)) >=
             (int)sizeof(name) ? -ENOSPC : 0;
     }
   else
@@ -1051,6 +1138,11 @@ static int fc_script_make_paths(const char *name_or_path, char *leaf,
   if (ret < 0)
     {
       return ret;
+    }
+
+  if (kind_out != NULL)
+    {
+      *kind_out = found_kind;
     }
 
   return fc_strlcpy(leaf, name, leaf_len);
@@ -1161,15 +1253,58 @@ static void fc_script_read_description(const char *path, char *desc,
     }
 }
 
+static int fc_script_run_generated(const fc_tool_context_t *ctx,
+                                   fc_script_kind_t kind,
+                                   const char *rel, const char *full,
+                                   const char *args_json,
+                                   char *out, size_t out_len)
+{
+  if (kind == FC_SCRIPT_KIND_BERRY)
+    {
+      return fc_berry_run_file(ctx, rel, args_json ? args_json : "{}",
+                               out, out_len);
+    }
+
+  if (kind == FC_SCRIPT_KIND_SHELL)
+    {
+      char command[FC_TERMINAL_MAX_COMMAND + 1];
+      char command_esc[(FC_TERMINAL_MAX_COMMAND * 6) + 1];
+      char terminal_args[(FC_TERMINAL_MAX_COMMAND * 6) + 32];
+
+      (void)rel;
+      (void)args_json;
+
+      if (full == NULL ||
+          snprintf(command, sizeof(command), "sh %s", full) >=
+          (int)sizeof(command))
+        {
+          snprintf(out, out_len,
+                   "{\"ok\":false,\"error\":\"shell script path too long\"}");
+          return -ENAMETOOLONG;
+        }
+
+      fc_json_escape(command, command_esc, sizeof(command_esc));
+      snprintf(terminal_args, sizeof(terminal_args),
+               "{\"command\":\"%s\"}", command_esc);
+      return fc_builtin_terminal_run(ctx, terminal_args, out, out_len);
+    }
+
+  snprintf(out, out_len, "{\"ok\":false,\"error\":\"unknown script kind\"}");
+  return -EINVAL;
+}
+
 static int fc_script_add_validation(cJSON *root,
                                     const fc_tool_context_t *ctx,
-                                    const char *rel, int *validation_ret)
+                                    fc_script_kind_t kind,
+                                    const char *rel, const char *full,
+                                    int *validation_ret)
 {
   char *run_out;
   cJSON *parsed;
   int ret;
 
-  if (root == NULL || rel == NULL || validation_ret == NULL)
+  if (root == NULL || rel == NULL || full == NULL ||
+      validation_ret == NULL)
     {
       return -EINVAL;
     }
@@ -1180,8 +1315,8 @@ static int fc_script_add_validation(cJSON *root,
       return -ENOMEM;
     }
 
-  ret = fc_berry_run_file(ctx, rel, "{}", run_out,
-                          CONFIG_FRUITCLAW_MAX_JSON);
+  ret = fc_script_run_generated(ctx, kind, rel, full, "{}",
+                                run_out, CONFIG_FRUITCLAW_MAX_JSON);
   *validation_ret = ret;
   parsed = cJSON_Parse(run_out);
   if (parsed != NULL)
@@ -1252,6 +1387,7 @@ static int cap_script_list(const fc_tool_context_t *ctx,
       char rel[FC_PATH_LEN];
       char full[FC_PATH_LEN];
       char desc[FC_SCRIPT_DESC_MAX];
+      fc_script_kind_t kind;
       struct stat st;
       cJSON *item;
 
@@ -1262,14 +1398,14 @@ static int cap_script_list(const fc_tool_context_t *ctx,
           continue;
         }
 
-      if (strlen(ent->d_name) < 3 ||
-          strcmp(ent->d_name + strlen(ent->d_name) - 3, ".be") != 0)
+      if (fc_script_kind_from_leaf(ent->d_name, &kind) < 0)
         {
           continue;
         }
 
-      if (fc_script_make_paths(ent->d_name, leaf, sizeof(leaf),
-                               rel, sizeof(rel), full, sizeof(full)) < 0)
+      if (fc_script_make_paths_kind(ent->d_name, FC_SCRIPT_KIND_AUTO,
+                                    leaf, sizeof(leaf), rel, sizeof(rel),
+                                    full, sizeof(full), &kind) < 0)
         {
           continue;
         }
@@ -1284,7 +1420,7 @@ static int cap_script_list(const fc_tool_context_t *ctx,
       fc_script_read_description(full, desc, sizeof(desc));
       cJSON_AddStringToObject(item, "name", leaf);
       cJSON_AddStringToObject(item, "path", rel);
-      cJSON_AddStringToObject(item, "kind", "berry");
+      cJSON_AddStringToObject(item, "kind", fc_script_kind_name(kind));
       if (desc[0] != '\0')
         {
           cJSON_AddStringToObject(item, "description", desc);
@@ -1327,10 +1463,13 @@ static int cap_script_read(const fc_tool_context_t *ctx,
   cJSON *root = cJSON_Parse(args_json ? args_json : "{}");
   cJSON *reply;
   const char *name;
+  const char *kind_arg;
   char leaf[FC_SCRIPT_NAME_MAX + 4];
   char rel[FC_PATH_LEN];
   char full[FC_PATH_LEN];
   char desc[FC_SCRIPT_DESC_MAX];
+  fc_script_kind_t requested_kind;
+  fc_script_kind_t kind;
   char *text;
   char *printed;
   int ret;
@@ -1347,8 +1486,15 @@ static int cap_script_read(const fc_tool_context_t *ctx,
       name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "path"));
     }
 
-  ret = fc_script_make_paths(name, leaf, sizeof(leaf), rel, sizeof(rel),
-                             full, sizeof(full));
+  kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
+  ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
+  if (ret == 0)
+    {
+      ret = fc_script_make_paths_kind(name, requested_kind, leaf,
+                                      sizeof(leaf), rel, sizeof(rel),
+                                      full, sizeof(full), &kind);
+    }
+
   cJSON_Delete(root);
   if (ret < 0)
     {
@@ -1381,7 +1527,7 @@ static int cap_script_read(const fc_tool_context_t *ctx,
   cJSON_AddBoolToObject(reply, "ok", true);
   cJSON_AddStringToObject(reply, "name", leaf);
   cJSON_AddStringToObject(reply, "path", rel);
-  cJSON_AddStringToObject(reply, "kind", "berry");
+  cJSON_AddStringToObject(reply, "kind", fc_script_kind_name(kind));
   if (desc[0] != '\0')
     {
       cJSON_AddStringToObject(reply, "description", desc);
@@ -1411,9 +1557,12 @@ static int cap_script_write(const fc_tool_context_t *ctx,
   const char *name;
   const char *text;
   const char *description;
+  const char *kind_arg;
   char leaf[FC_SCRIPT_NAME_MAX + 4];
   char rel[FC_PATH_LEN];
   char full[FC_PATH_LEN];
+  fc_script_kind_t requested_kind;
+  fc_script_kind_t kind;
   char *content;
   char *printed;
   bool validate = true;
@@ -1440,6 +1589,7 @@ static int cap_script_write(const fc_tool_context_t *ctx,
   text = cJSON_GetStringValue(cJSON_GetObjectItem(root, "text"));
   description = cJSON_GetStringValue(cJSON_GetObjectItem(root,
                                                          "description"));
+  kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
   validate_item = cJSON_GetObjectItem(root, "validate");
   if (cJSON_IsBool(validate_item))
     {
@@ -1454,8 +1604,14 @@ static int cap_script_write(const fc_tool_context_t *ctx,
       return -EINVAL;
     }
 
-  ret = fc_script_make_paths(name, leaf, sizeof(leaf), rel, sizeof(rel),
-                             full, sizeof(full));
+  ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
+  if (ret == 0)
+    {
+      ret = fc_script_make_paths_kind(name, requested_kind, leaf,
+                                      sizeof(leaf), rel, sizeof(rel),
+                                      full, sizeof(full), &kind);
+    }
+
   if (ret < 0)
     {
       cJSON_Delete(root);
@@ -1498,11 +1654,12 @@ static int cap_script_write(const fc_tool_context_t *ctx,
 
   cJSON_AddStringToObject(reply, "name", leaf);
   cJSON_AddStringToObject(reply, "path", rel);
-  cJSON_AddStringToObject(reply, "kind", "berry");
+  cJSON_AddStringToObject(reply, "kind", fc_script_kind_name(kind));
   cJSON_AddBoolToObject(reply, "validated", false);
   if (validate)
     {
-      ret = fc_script_add_validation(reply, ctx, rel, &validation_ret);
+      ret = fc_script_add_validation(reply, ctx, kind, rel, full,
+                                     &validation_ret);
       cJSON_ReplaceItemInObject(reply, "validated",
                                 cJSON_CreateBool(validation_ret == 0));
       if (ret == 0)
@@ -1541,9 +1698,12 @@ static int cap_script_validate(const fc_tool_context_t *ctx,
   cJSON *root = cJSON_Parse(args_json ? args_json : "{}");
   cJSON *reply;
   const char *name;
+  const char *kind_arg;
   char leaf[FC_SCRIPT_NAME_MAX + 4];
   char rel[FC_PATH_LEN];
   char full[FC_PATH_LEN];
+  fc_script_kind_t requested_kind;
+  fc_script_kind_t kind;
   char *printed;
   int validation_ret = 0;
   int ret;
@@ -1559,8 +1719,15 @@ static int cap_script_validate(const fc_tool_context_t *ctx,
       name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "path"));
     }
 
-  ret = fc_script_make_paths(name, leaf, sizeof(leaf), rel, sizeof(rel),
-                             full, sizeof(full));
+  kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
+  ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
+  if (ret == 0)
+    {
+      ret = fc_script_make_paths_kind(name, requested_kind, leaf,
+                                      sizeof(leaf), rel, sizeof(rel),
+                                      full, sizeof(full), &kind);
+    }
+
   cJSON_Delete(root);
   if (ret < 0)
     {
@@ -1582,14 +1749,139 @@ static int cap_script_validate(const fc_tool_context_t *ctx,
 
   cJSON_AddStringToObject(reply, "name", leaf);
   cJSON_AddStringToObject(reply, "path", rel);
-  cJSON_AddStringToObject(reply, "kind", "berry");
-  ret = fc_script_add_validation(reply, ctx, rel, &validation_ret);
+  cJSON_AddStringToObject(reply, "kind", fc_script_kind_name(kind));
+  ret = fc_script_add_validation(reply, ctx, kind, rel, full,
+                                 &validation_ret);
   cJSON_AddBoolToObject(reply, "ok", ret == 0 && validation_ret == 0);
   cJSON_AddBoolToObject(reply, "validated", validation_ret == 0);
   if (ret == 0 && validation_ret < 0)
     {
       ret = validation_ret;
       cJSON_AddStringToObject(reply, "error", "script validation failed");
+      cJSON_AddNumberToObject(reply, "code", ret);
+    }
+
+  printed = cJSON_PrintUnformatted(reply);
+  cJSON_Delete(reply);
+  if (printed == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  if (fc_strlcpy(out, printed, out_len) < 0)
+    {
+      ret = -ENOSPC;
+    }
+
+  cJSON_free(printed);
+  return ret;
+}
+
+static int cap_script_run(const fc_tool_context_t *ctx,
+                          const char *args_json, char *out,
+                          size_t out_len)
+{
+  cJSON *root = cJSON_Parse(args_json ? args_json : "{}");
+  cJSON *reply;
+  cJSON *parsed;
+  const char *name;
+  const char *kind_arg;
+  const char *script_args = "{}";
+  char leaf[FC_SCRIPT_NAME_MAX + 4];
+  char rel[FC_PATH_LEN];
+  char full[FC_PATH_LEN];
+  fc_script_kind_t requested_kind;
+  fc_script_kind_t kind;
+  char *run_out;
+  char *printed;
+  int ret;
+
+  if (!fc_ctx_owner(ctx))
+    {
+      snprintf(out, out_len, "{\"ok\":false,\"error\":\"owner required\"}");
+      return -EACCES;
+    }
+
+  if (root == NULL)
+    {
+      return fc_json_out_error(out, out_len, "invalid JSON");
+    }
+
+  name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "name"));
+  if (name == NULL)
+    {
+      name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "path"));
+    }
+
+  kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
+  script_args = cJSON_GetStringValue(cJSON_GetObjectItem(root, "args_json"));
+  if (script_args == NULL)
+    {
+      script_args = "{}";
+    }
+
+  if (strlen(script_args) > 512)
+    {
+      cJSON_Delete(root);
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"script args too large\"}");
+      return -ENOSPC;
+    }
+
+  ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
+  if (ret == 0)
+    {
+      ret = fc_script_make_paths_kind(name, requested_kind, leaf,
+                                      sizeof(leaf), rel, sizeof(rel),
+                                      full, sizeof(full), &kind);
+    }
+
+  cJSON_Delete(root);
+  if (ret < 0)
+    {
+      snprintf(out, out_len, "{\"ok\":false,\"error\":\"script denied\"}");
+      return ret;
+    }
+
+  if (access(full, F_OK) < 0)
+    {
+      snprintf(out, out_len, "{\"ok\":false,\"error\":\"script missing\"}");
+      return -ENOENT;
+    }
+
+  run_out = calloc(1, CONFIG_FRUITCLAW_MAX_JSON);
+  if (run_out == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  ret = fc_script_run_generated(ctx, kind, rel, full, script_args,
+                                run_out, CONFIG_FRUITCLAW_MAX_JSON);
+  reply = cJSON_CreateObject();
+  if (reply == NULL)
+    {
+      free(run_out);
+      return -ENOMEM;
+    }
+
+  cJSON_AddBoolToObject(reply, "ok", ret == 0);
+  cJSON_AddStringToObject(reply, "name", leaf);
+  cJSON_AddStringToObject(reply, "path", rel);
+  cJSON_AddStringToObject(reply, "kind", fc_script_kind_name(kind));
+  parsed = cJSON_Parse(run_out);
+  if (parsed != NULL)
+    {
+      cJSON_AddItemToObject(reply, "result", parsed);
+    }
+  else
+    {
+      cJSON_AddStringToObject(reply, "output", run_out);
+    }
+
+  free(run_out);
+  if (ret < 0)
+    {
+      cJSON_AddStringToObject(reply, "error", "script run failed");
       cJSON_AddNumberToObject(reply, "code", ret);
     }
 
@@ -1617,6 +1909,7 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
   cJSON *tool_args;
   cJSON *printed_args;
   const char *name;
+  const char *kind_arg;
   const char *type;
   const char *id;
   const char *script_args = "{}";
@@ -1627,6 +1920,8 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
   char rel[FC_PATH_LEN];
   char full[FC_PATH_LEN];
   char prompt[CONFIG_FRUITCLAW_MAX_EVENT_TEXT];
+  fc_script_kind_t requested_kind;
+  fc_script_kind_t kind;
   char *tool_args_json;
   int guard_fd = -1;
   int ret = -EINVAL;
@@ -1650,6 +1945,7 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
 
   type = cJSON_GetStringValue(cJSON_GetObjectItem(root, "type"));
   id = cJSON_GetStringValue(cJSON_GetObjectItem(root, "id"));
+  kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
   script_args = cJSON_GetStringValue(cJSON_GetObjectItem(root, "args_json"));
   if (script_args == NULL)
     {
@@ -1671,8 +1967,14 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
       return -ENOSPC;
     }
 
-  ret = fc_script_make_paths(name, leaf, sizeof(leaf), rel, sizeof(rel),
-                             full, sizeof(full));
+  ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
+  if (ret == 0)
+    {
+      ret = fc_script_make_paths_kind(name, requested_kind, leaf,
+                                      sizeof(leaf), rel, sizeof(rel),
+                                      full, sizeof(full), &kind);
+    }
+
   if (ret < 0 || access(full, F_OK) < 0)
     {
       cJSON_Delete(root);
@@ -1696,6 +1998,7 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
     }
 
   cJSON_AddStringToObject(tool_args, "path", rel);
+  cJSON_AddStringToObject(tool_args, "kind", fc_script_kind_name(kind));
   cJSON_AddStringToObject(tool_args, "args_json", script_args);
   tool_args_json = cJSON_PrintUnformatted(tool_args);
   cJSON_Delete(tool_args);
@@ -1705,7 +2008,7 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
       return -ENOMEM;
     }
 
-  if (snprintf(prompt, sizeof(prompt), "tool:berry.run_script %s",
+  if (snprintf(prompt, sizeof(prompt), "tool:script.run %s",
                tool_args_json) >= (int)sizeof(prompt))
     {
       cJSON_free(tool_args_json);
@@ -1782,6 +2085,7 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
   cJSON_AddBoolToObject(printed_args, "ok", ret == 0);
   cJSON_AddStringToObject(printed_args, "id", saved_id);
   cJSON_AddStringToObject(printed_args, "script", rel);
+  cJSON_AddStringToObject(printed_args, "kind", fc_script_kind_name(kind));
   cJSON_AddStringToObject(printed_args, "type", saved_type);
   if (ret < 0)
     {
@@ -3430,7 +3734,7 @@ static const fc_cap_t g_caps[] =
   {
     "web.home.write", "Write web home page",
     "Replace the Markdown body rendered by the root web page and served "
-    "through /site/home.md. The static root shell links to /doc/ for the "
+    "through /site/home.md. The static root shell links to /docs/ for the "
     "manual.",
     "{\"type\":\"object\",\"properties\":{\"markdown\":{\"type\":\"string\"},"
     "\"text\":{\"type\":\"string\"}},\"additionalProperties\":false}",
@@ -3438,45 +3742,63 @@ static const fc_cap_t g_caps[] =
   },
   {
     "script.list", "List generated scripts",
-    "List Berry scripts created by FruitClaw under scripts/generated/, "
-    "including stored descriptions when present.",
+    "List generated Berry .be and NSH .nsh scripts created by FruitClaw "
+    "under scripts/generated/, including stored descriptions when present.",
     "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
     true, false, cap_script_list
   },
   {
     "script.read", "Read generated script",
-    "Read a Berry script from scripts/generated/ so the owner or agent can "
-    "inspect and rework it.",
+    "Read a generated Berry or NSH script from scripts/generated/ so the "
+    "owner or agent can inspect and rework it.",
     "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
-    "\"path\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+    "\"path\":{\"type\":\"string\"},\"kind\":{\"type\":\"string\","
+    "\"enum\":[\"auto\",\"berry\",\"be\",\"shell\",\"nsh\",\"sh\"]}},"
+    "\"additionalProperties\":false}",
     true, false, cap_script_read
   },
   {
     "script.write", "Write generated script",
-    "Create or replace a Berry script under scripts/generated/. By default "
-    "the script is validated by running it once through the guarded Berry "
-    "runner.",
+    "Create or replace a generated Berry .be or NSH .nsh script under "
+    "scripts/generated/. By default the script is validated by running it "
+    "once through the guarded runner.",
     "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
     "\"path\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},"
-    "\"text\":{\"type\":\"string\"},\"validate\":{\"type\":\"boolean\"}},"
+    "\"kind\":{\"type\":\"string\",\"enum\":[\"auto\",\"berry\",\"be\","
+    "\"shell\",\"nsh\",\"sh\"]},\"text\":{\"type\":\"string\"},"
+    "\"validate\":{\"type\":\"boolean\"}},"
     "\"required\":[\"text\"],\"additionalProperties\":false}",
     true, true, cap_script_write
   },
   {
     "script.validate", "Validate generated script",
-    "Run a generated Berry script once through the guarded Berry runner and "
-    "return the validation result.",
+    "Run a generated Berry or NSH script once through the guarded runner "
+    "and return the validation result.",
     "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
-    "\"path\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+    "\"path\":{\"type\":\"string\"},\"kind\":{\"type\":\"string\","
+    "\"enum\":[\"auto\",\"berry\",\"be\",\"shell\",\"nsh\",\"sh\"]}},"
+    "\"additionalProperties\":false}",
     true, true, cap_script_validate
   },
   {
+    "script.run", "Run generated script",
+    "Run a generated Berry or NSH script under scripts/generated/ through "
+    "the guarded runner.",
+    "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
+    "\"path\":{\"type\":\"string\"},\"kind\":{\"type\":\"string\","
+    "\"enum\":[\"auto\",\"berry\",\"be\",\"shell\",\"nsh\",\"sh\"]},"
+    "\"args_json\":{\"type\":\"string\"}},\"additionalProperties\":false}",
+    true, true, cap_script_run
+  },
+  {
     "script.schedule", "Schedule generated script",
-    "Schedule a generated Berry script to run once, on an interval, or from "
-    "a 5-field cron expression. The scheduler fires berry.run_script "
+    "Schedule a generated Berry or NSH script to run once, on an interval, "
+    "or from a 5-field cron expression. The scheduler fires script.run "
     "directly without needing the LLM.",
     "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},"
     "\"name\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},"
+    "\"kind\":{\"type\":\"string\",\"enum\":[\"auto\",\"berry\",\"be\","
+    "\"shell\",\"nsh\",\"sh\"]},"
     "\"type\":{\"type\":\"string\",\"enum\":[\"interval\",\"once\",\"cron\"]},"
     "\"every_sec\":{\"type\":\"integer\"},\"at_epoch\":{\"type\":\"integer\"},"
     "\"after_sec\":{\"type\":\"integer\"},\"expr\":{\"type\":\"string\"},"

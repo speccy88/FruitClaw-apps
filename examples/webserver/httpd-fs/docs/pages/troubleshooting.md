@@ -80,12 +80,22 @@ curl -i http://DEVICE_IP/mcp \
 Use `ps` to see whether a foreground command is occupying a shell. Long-running
 apps such as `cgol` stay in the foreground until Ctrl-C.
 
+## USB Console Echo
+
+The production profile keeps NSH echoback enabled, so a default serial program
+such as `tio /dev/cu.usbmodem01` should show what you type and Enter should
+advance cleanly to the next prompt. If an older alpha image shows repeated
+`nsh>` prompts on one line or hides typed characters, rebuild with
+`CONFIG_NSH_DISABLE_ECHOBACK` unset.
+
 ## Wi-Fi
 
 The current unattended image leaves the absolute Wi-Fi config path empty and
-reads the data-root leaf:
+reads `wifi.conf` from the active data root first. If the file is not there,
+FruitClaw also checks the SD and fallback data roots:
 
 ```text
+/mnt/sd0/fruitclaw/wifi.conf
 /data/fruitclaw/wifi.conf
 ```
 

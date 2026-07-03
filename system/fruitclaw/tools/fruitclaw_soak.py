@@ -227,24 +227,24 @@ def check_static_docs(args: argparse.Namespace) -> tuple[bool, str]:
         status, html = http_get_text(f"{base}/index.html",
                                      args.command_timeout)
         if status != 200 or (
-            "Open Documentation" not in html or "/site/home.md" not in html
+            "Open /docs Manual" not in html or "/site/home.md" not in html
         ):
             return False, f"index.html docs check failed: http={status}"
 
-        status, docs_html = http_get_text(f"{base}/doc/index.html",
+        status, docs_html = http_get_text(f"{base}/docs/index.html",
                                           args.command_timeout)
         if status != 200 or "FruitClaw Manual" not in docs_html:
-            return False, f"doc/index.html returned http={status}"
+            return False, f"docs/index.html returned http={status}"
 
-        status, raw_index = http_get_text(f"{base}/doc/index.json",
+        status, raw_index = http_get_text(f"{base}/docs/index.json",
                                           args.command_timeout)
         if status != 200:
-            return False, f"doc/index.json returned http={status}"
+            return False, f"docs/index.json returned http={status}"
 
         index = json.loads(raw_index)
         pages = index.get("pages")
         if not isinstance(pages, list) or not pages:
-            return False, "doc/index.json has no pages"
+            return False, "docs/index.json has no pages"
 
         slugs = {page.get("slug") for page in pages if isinstance(page, dict)}
         if not {"home", "tools"}.issubset(slugs):
@@ -2319,7 +2319,7 @@ def main() -> int:
     parser.add_argument("--check-docs", "--check-wiki", dest="check_docs",
                         action="store_true",
                         help="also verify static GET /index.html and "
-                        "/doc/index.json")
+                        "/docs/index.json")
     parser.add_argument("--scheduler-smoke", action="store_true",
                         help="once per run, add a short one-shot schedule, "
                         "wait for it to fire, then remove it")

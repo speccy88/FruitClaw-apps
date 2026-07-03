@@ -130,10 +130,11 @@ The current MCP `tools/list` surface contains 30 visible tools:
 | `file.write_limited` | Write files under `scripts/` or `notes/`. |
 | `web.home.read` | Read the Markdown rendered by the root web page. |
 | `web.home.write` | Replace the Markdown rendered by the root web page and served from `/site/home.md`. |
-| `script.list` | List generated Berry scripts under `scripts/generated/`. |
-| `script.read` | Read a generated Berry script for inspection. |
-| `script.write` | Create or replace a generated Berry script, with optional validation. |
-| `script.validate` | Run a generated Berry script through the guarded Berry runner. |
+| `script.list` | List generated Berry `.be` and NSH `.nsh` scripts under `scripts/generated/`. |
+| `script.read` | Read a generated Berry or NSH script for inspection. |
+| `script.write` | Create or replace a generated Berry or NSH script, with optional validation. |
+| `script.validate` | Run a generated Berry or NSH script through the guarded runner. |
+| `script.run` | Run a generated Berry or NSH script directly. |
 | `script.schedule` | Schedule a generated script once, on an interval, or by cron. |
 | `telegram.send_message` | Send plain text to an allowed Telegram chat. |
 | `scheduler.add` | Add interval, once, after, or cron schedules. |
@@ -167,7 +168,8 @@ Prefer specific tools over shell commands:
 | Read a device | `device.read` |
 | Set LEDs | `neopixels.set` or `neopixels.effect` |
 | Schedule work | `scheduler.add` |
-| Run Berry | `berry.run_script` |
+| Run Berry | `berry.run_script` or generated `script.run` with `kind=berry` |
+| Run generated NSH | `script.run` with `kind=shell` |
 
 `terminal.run` has fast in-process handling for simple commands such as
 `help` and `uname -a`. It deliberately points `/dev` enumeration and DVI

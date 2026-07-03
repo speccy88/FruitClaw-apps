@@ -396,6 +396,7 @@ int fc_init_data_dir(void)
   fc_migrate_from_fallback_if_missing("secrets/deepseek_api_key");
   fc_migrate_from_fallback_if_missing("telegram_allowed_chats.txt");
   fc_migrate_from_fallback_if_missing("telegram_offset");
+  fc_migrate_from_fallback_if_missing(CONFIG_FRUITCLAW_WIFI_CONFIG_LEAF);
   fc_migrate_from_fallback_if_missing("certs/roots.pem");
   fc_migrate_from_fallback_if_missing("http_allowlist.txt");
 

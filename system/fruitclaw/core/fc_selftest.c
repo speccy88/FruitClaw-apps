@@ -167,6 +167,7 @@ int fc_selftest_main(void)
     }
 
   ret |= check(fc_cap_find("self.fake") != NULL, "cap find");
+  ret |= check(fc_cap_find("script.run") != NULL, "script run cap");
 #ifdef CONFIG_FRUITCLAW_ENABLE_SHELL_TOOL
   ret |= check(fc_cap_find("shell.safe_command") != NULL,
                "shell alias enabled");
@@ -546,6 +547,43 @@ int fc_selftest_main(void)
                                  buf, sizeof(buf)) < 0 &&
                strstr(buf, "path denied") != NULL,
                "berry path jail");
+
+  {
+    char script_path[FC_PATH_LEN] = "";
+
+    if (fc_data_path("scripts/generated/selftest_shell.nsh",
+                     script_path, sizeof(script_path)) == 0)
+      {
+        unlink(script_path);
+      }
+
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.write",
+                 "{\"name\":\"selftest_shell\",\"kind\":\"shell\","
+                 "\"description\":\"selftest generated shell\","
+                 "\"text\":\"echo selftest-shell\\n\","
+                 "\"validate\":false}",
+                 buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"kind\":\"shell\"") != NULL,
+                 "script write shell");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.read",
+                 "{\"name\":\"selftest_shell\",\"kind\":\"shell\"}",
+                 buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"selftest_shell.nsh\"") != NULL &&
+                 strstr(buf, "\"kind\":\"shell\"") != NULL,
+                 "script read shell");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.list", "{}",
+                 buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "selftest_shell.nsh") != NULL,
+                 "script list shell");
+
+    if (script_path[0] != '\0')
+      {
+        unlink(script_path);
+      }
+  }
 
 #if defined(CONFIG_FRUITCLAW_ENABLE_BERRY) && \
     defined(CONFIG_FRUITCLAW_BERRY_EXPERIMENTAL_RUNNER)

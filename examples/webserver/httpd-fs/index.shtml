@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=/doc/#/home">
+<meta http-equiv="refresh" content="0; url=/docs/#/home">
 <script>
-  location.replace("/doc/" + (location.hash || "#/home"));
+  location.replace("/docs/" + (location.hash || "#/home"));
 </script>
-<a href="/doc/#/home">Open the FruitClaw documentation</a>
+<a href="/docs/#/home">Open the FruitClaw documentation</a>
