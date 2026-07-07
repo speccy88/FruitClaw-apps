@@ -128,3 +128,4 @@ static void deh_weapon_sha1_sum(SHA1_CTX *context)
       deh_struct_sha1_sum(context, &weapon_mapping, &weaponinfo[i]);
     }
 }
+

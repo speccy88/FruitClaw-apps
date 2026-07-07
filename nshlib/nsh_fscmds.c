@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 #include <string.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -599,6 +600,19 @@ static int ls_handler(FAR struct nsh_vtbl_s *vtbl, FAR const char *dirpath,
               nsh_output(vtbl, "%12" PRIdOFF, buf.st_size);
             }
         }
+
+      /* Display modification time in long format */
+
+      if ((lsflags & LSFLAGS_LONG) != 0 && buf.st_mtime != 0)
+        {
+          struct tm tm;
+          char timebuf[20];
+          time_t mtime = (time_t)buf.st_mtime;
+
+          gmtime_r(&mtime, &tm);
+          strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M", &tm);
+          nsh_output(vtbl, " %s", timebuf);
+        }
     }
 
   /* Then provide the filename that is common to normal and verbose output */
@@ -739,13 +753,14 @@ static int fdinfo_callback(FAR struct nsh_vtbl_s *vtbl,
   if (ret < 0)
     {
       nsh_error(vtbl, g_fmtcmdfailed, "fdinfo", "asprintf", NSH_ERRNO);
+      return ret;
     }
 
   nsh_output(vtbl, "\npid:%s", entryp->d_name);
   ret = nsh_catfile(vtbl, "fdinfo", filepath);
   if (ret < 0)
     {
-      nsh_error(vtbl, g_fmtcmdfailed, "fdinfo", "nsh_catfaile", NSH_ERRNO);
+      nsh_error(vtbl, g_fmtcmdfailed, "fdinfo", "nsh_catfile", NSH_ERRNO);
     }
 
   free(filepath);
@@ -857,6 +872,10 @@ int cmd_cat(FAR struct nsh_vtbl_s *vtbl, int argc, FAR char **argv)
   if (argc == 1)
     {
       char *buf = malloc(BUFSIZ);
+      if (buf == NULL)
+        {
+          return -ENOMEM;
+        }
 
       /* Dump from input */
 

@@ -26,8 +26,6 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
@@ -2047,18 +2045,12 @@ static void set_variable(default_t *def, const char *value)
          * locale's decimal separator before passing it to atof().
          */
 
+        struct lconv *lc = localeconv();
         char dec;
         char *str;
         int i = 0;
 
-#ifdef CONFIG_LIBC_LOCALE
-        struct lconv *lc = localeconv();
-
-        dec = (lc != NULL && lc->decimal_point != NULL &&
-               lc->decimal_point[0] != '\0') ? lc->decimal_point[0] : '.';
-#else
-        dec = '.';
-#endif
+        dec = lc->decimal_point[0];
         str = m_string_duplicate(value);
 
         /* Skip sign indicators. */

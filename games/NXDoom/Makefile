@@ -130,7 +130,7 @@ DOOMSRCS =     \
   statdump.c   \
   st_lib.c     \
   st_stuff.c   \
-  wi_stuff.c
+  wi_stuff.c   
 
 TXTSCREENSRCS =       \
   txt_conditional.c   \
@@ -153,7 +153,7 @@ TXTSCREENSRCS =       \
   txt_utf8.c          \
   txt_widget.c        \
   txt_window.c        \
-  txt_window_action.c
+  txt_window_action.c 
 
 CSRCS += $(patsubst %,$(COMMONSRCDIR)/%,$(COMMONSRCS))
 CSRCS += $(patsubst %,$(COMMONSRCDIR)/%,$(DEHACKEDSRCS))

@@ -166,9 +166,7 @@ enum
   OPT_EMPTY1,
   OPT_MOUSESENS,
   OPT_EMPTY2,
-#ifdef CONFIG_GAMES_NXDOOM_SOUND
   OPT_SOUNDVOL,
-#endif
   OPT_END
 } options_e;
 
@@ -186,7 +184,6 @@ enum
 
 /* SOUND VOLUME MENU */
 
-#ifdef CONFIG_GAMES_NXDOOM_SOUND
 enum
 {
   SOUND_SFXVOL,
@@ -195,7 +192,6 @@ enum
   SOUND_SFXEMPTY2,
   SOUND_END
 } sound_e;
-#endif
 
 /* LOAD GAME MENU */
 
@@ -227,15 +223,9 @@ static void m_quit_doom(int choice);
 
 static void m_change_messages(int choice);
 static void m_change_sensitivity(int choice);
-#ifdef CONFIG_GAMES_NXDOOM_SOUND
-static void m_sfx_vol(int choice);
-static void m_music_vol(int choice);
-#endif
+static void m_sound(int choice);
 static void m_change_detail(int choice);
 static void m_size_display(int choice);
-#ifdef CONFIG_GAMES_NXDOOM_SOUND
-static void m_sound(int choice);
-#endif
 
 static void m_finish_read_this(int choice);
 static void m_load_select(int choice);
@@ -250,9 +240,6 @@ static void m_draw_read_this2(void);
 static void m_draw_new_game(void);
 static void m_draw_episode(void);
 static void m_draw_options(void);
-#ifdef CONFIG_GAMES_NXDOOM_SOUND
-static void m_draw_sound(void);
-#endif
 static void m_draw_load(void);
 static void m_draw_save(void);
 
@@ -265,6 +252,12 @@ static int m_string_height(const char *string);
 static void m_start_message(const char *string,
         void *routine, boolean input);
 static void m_clear_menus(void);
+
+#ifdef CONFIG_GAMES_NXDOOM_SOUND
+static void m_sfx_vol(int choice);
+static void m_music_vol(int choice);
+static void m_draw_sound(void);
+#endif
 
 /****************************************************************************
  * Public Data
@@ -292,8 +285,6 @@ boolean inhelpscreens;
 
 /* message x & y */
 
-static int g_messx;
-static int g_messy;
 static int g_message_last_menu_active;
 
 /* timed message = no input from user */
@@ -485,14 +476,12 @@ static menuitem_t g_options_menu[] =
         0,
         '\0',
     },
-#ifdef CONFIG_GAMES_NXDOOM_SOUND
     {
         1,
         "M_SVOL",
         m_sound,
         's',
     },
-#endif
 };
 
 static menu_t g_options_def =
@@ -927,7 +916,7 @@ void m_quick_save(void)
   m_start_message(g_tempstring, m_quick_save_response, true);
 }
 
-void m_quick_load(void)
+static void m_quick_load(void)
 {
   if (netgame)
     {
@@ -950,7 +939,7 @@ void m_quick_load(void)
  * Had a "quick hack to fix romero bug"
  */
 
-void m_draw_read_this1(void)
+static void m_draw_read_this1(void)
 {
   inhelpscreens = true;
 
@@ -959,7 +948,7 @@ void m_draw_read_this1(void)
 
 /* Read This Menus - optional second page. */
 
-void m_draw_read_this2(void)
+static void m_draw_read_this2(void)
 {
   inhelpscreens = true;
 
@@ -973,7 +962,7 @@ void m_draw_read_this2(void)
 /* Change Sfx & Music volumes */
 
 #ifdef CONFIG_GAMES_NXDOOM_SOUND
-void m_draw_sound(void)
+static void m_draw_sound(void)
 {
   v_draw_patch_direct(60, 38, w_cache_lump_name(("M_SVOL"), PU_CACHE));
 
@@ -985,13 +974,17 @@ void m_draw_sound(void)
                 g_sound_def.y + LINEHEIGHT * (SOUND_MUSICVOL + 1), 16,
                 g_music_volume);
 }
+#endif
 
-void m_sound(int choice)
+static void m_sound(int choice)
 {
+#ifdef CONFIG_GAMES_NXDOOM_SOUND
   m_setup_next_menu(&g_sound_def);
+#endif
 }
 
-void m_sfx_vol(int choice)
+#ifdef CONFIG_GAMES_NXDOOM_SOUND
+static void m_sfx_vol(int choice)
 {
   switch (choice)
     {
@@ -1005,8 +998,10 @@ void m_sfx_vol(int choice)
 
   s_set_sfx_volume(g_sfx_volume * 8);
 }
+#endif
 
-void m_music_vol(int choice)
+#ifdef CONFIG_GAMES_NXDOOM_SOUND
+static void m_music_vol(int choice)
 {
   switch (choice)
     {
@@ -1699,16 +1694,16 @@ boolean m_responder(event_t *ev)
           m_load_game(0);
           return true;
         }
-#ifdef CONFIG_GAMES_NXDOOM_SOUND
       else if (key == key_menu_volume) /* Sound Volume */
         {
           m_start_control_panel();
-          g_current_menu = &g_sound_def;
           g_item_on = SOUND_SFXVOL;
+#ifdef CONFIG_GAMES_NXDOOM_SOUND
+          g_current_menu = &g_sound_def;
           s_start_sound(NULL, SFX_SWTCHN);
+#endif
           return true;
         }
-#endif
       else if (key == key_menu_detail) /* Detail toggle */
         {
           m_change_detail(0);

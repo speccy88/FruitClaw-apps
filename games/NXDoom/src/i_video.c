@@ -30,15 +30,11 @@
 #include <nuttx/video/fb.h>
 #include <nuttx/video/rgbcolors.h>
 
-#include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <unistd.h>
 
 #include "config.h"
 #include "d_loop.h"
@@ -65,7 +61,6 @@
 #define RESIZE_DELAY 500
 
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 /****************************************************************************
  * Private Types
@@ -97,13 +92,6 @@ struct graphics_state_s
 
   uint8_t scale;
 
-  /* Centered render rectangle in the target framebuffer. */
-
-  fb_coord_t xoffset;
-  fb_coord_t yoffset;
-  fb_coord_t render_width;
-  fb_coord_t render_height;
-
   bool inited; /* Track initialization */
 };
 
@@ -125,10 +113,6 @@ static const char *g_window_title = "";
 /* Colour palette map from 8-bit colour to 32-bit */
 
 static struct argbcolor_s g_palette[256];
-
-/* Colour palette map from 8-bit colour to RGB565 */
-
-static uint16_t g_palette_rgb565[256];
 
 static boolean palette_to_set;
 
@@ -265,138 +249,6 @@ unsigned int joywait = 0;
  ****************************************************************************/
 
 /****************************************************************************
- * Name: rgb565_from_argb
- ****************************************************************************/
-
-static uint16_t rgb565_from_argb(FAR const struct argbcolor_s *color)
-{
-  return ((uint16_t)(color->r & 0xf8) << 8) |
-         ((uint16_t)(color->g & 0xfc) << 3) |
-         ((uint16_t)color->b >> 3);
-}
-
-/****************************************************************************
- * Name: framebuffer_is_rgb565
- ****************************************************************************/
-
-static bool framebuffer_is_rgb565(void)
-{
-  return g_graphics_state.vinfo.fmt == FB_FMT_RGB16_565 &&
-         g_graphics_state.pinfo.bpp == 16;
-}
-
-/****************************************************************************
- * Name: framebuffer_is_32bpp
- ****************************************************************************/
-
-static bool framebuffer_is_32bpp(void)
-{
-  return g_graphics_state.pinfo.bpp == 32;
-}
-
-/****************************************************************************
- * Name: clear_framebuffer
- ****************************************************************************/
-
-static void clear_framebuffer(void)
-{
-  FAR uint8_t *fbmem = g_graphics_state.fbmem;
-  unsigned int x;
-  unsigned int y;
-
-  if (framebuffer_is_rgb565())
-    {
-      for (y = 0; y < g_graphics_state.vinfo.yres; y++)
-        {
-          FAR uint16_t *row =
-              (FAR uint16_t *)(fbmem + y * g_graphics_state.pinfo.stride);
-
-          for (x = 0; x < g_graphics_state.vinfo.xres; x++)
-            {
-              row[x] = g_palette_rgb565[0];
-            }
-        }
-    }
-  else if (framebuffer_is_32bpp())
-    {
-      uint32_t black = ARGBTO32(g_palette[0].a, g_palette[0].r,
-                                g_palette[0].g, g_palette[0].b);
-
-      for (y = 0; y < g_graphics_state.vinfo.yres; y++)
-        {
-          FAR uint32_t *row =
-              (FAR uint32_t *)(fbmem + y * g_graphics_state.pinfo.stride);
-
-          for (x = 0; x < g_graphics_state.vinfo.xres; x++)
-            {
-              row[x] = black;
-            }
-        }
-    }
-  else
-    {
-      memset(fbmem, 0, g_graphics_state.pinfo.fblen);
-    }
-}
-
-/****************************************************************************
- * Name: blit_screen_rgb565
- ****************************************************************************/
-
-static void blit_screen_rgb565(void)
-{
-  FAR uint8_t *fbmem = g_graphics_state.fbmem;
-  unsigned int scale = g_graphics_state.scale;
-  unsigned int x;
-  unsigned int y;
-
-  for (y = 0; y < g_graphics_state.render_height; y++)
-    {
-      FAR uint16_t *row =
-          (FAR uint16_t *)(fbmem + (g_graphics_state.yoffset + y) *
-                           g_graphics_state.pinfo.stride) +
-          g_graphics_state.xoffset;
-      FAR pixel_t *srcrow =
-          g_graphics_state.scrnbuf + (y / scale) * SCREENWIDTH;
-
-      for (x = 0; x < g_graphics_state.render_width; x++)
-        {
-          row[x] = g_palette_rgb565[srcrow[x / scale]];
-        }
-    }
-}
-
-/****************************************************************************
- * Name: blit_screen_32bpp
- ****************************************************************************/
-
-static void blit_screen_32bpp(void)
-{
-  FAR uint8_t *fbmem = g_graphics_state.fbmem;
-  unsigned int scale = g_graphics_state.scale;
-  unsigned int x;
-  unsigned int y;
-
-  for (y = 0; y < g_graphics_state.render_height; y++)
-    {
-      FAR uint32_t *row =
-          (FAR uint32_t *)(fbmem + (g_graphics_state.yoffset + y) *
-                           g_graphics_state.pinfo.stride) +
-          g_graphics_state.xoffset;
-      FAR pixel_t *srcrow =
-          g_graphics_state.scrnbuf + (y / scale) * SCREENWIDTH;
-
-      for (x = 0; x < g_graphics_state.render_width; x++)
-        {
-          uint8_t p_idx = srcrow[x / scale];
-
-          row[x] = ARGBTO32(g_palette[p_idx].a, g_palette[p_idx].r,
-                            g_palette[p_idx].g, g_palette[p_idx].b);
-        }
-    }
-}
-
-/****************************************************************************
  * Name: blit_screen
  *
  * Description:
@@ -407,13 +259,30 @@ static void blit_screen_32bpp(void)
 
 static void blit_screen(void)
 {
-  if (framebuffer_is_rgb565())
+  uint8_t p_idx;
+  void *fbptr;
+
+  /* TODO: It would be best to do this more efficiently/with less memory.
+   * It also would be good if we could handle the palette translation here
+   * such that DOOM can be played on frame buffers with differing bit depths
+   * and pixel formats.
+   */
+
+  fbptr = g_graphics_state.fbmem;
+  for (unsigned y = 0; y < SCREENHEIGHT * g_graphics_state.scale; y++)
     {
-      blit_screen_rgb565();
-    }
-  else if (framebuffer_is_32bpp())
-    {
-      blit_screen_32bpp();
+      for (unsigned x = 0; x < SCREENWIDTH * g_graphics_state.scale; x++)
+        {
+          p_idx = g_graphics_state
+                      .scrnbuf[(y / g_graphics_state.scale) * SCREENWIDTH +
+                               (x / g_graphics_state.scale)];
+
+          ((uint32_t *)(fbptr))[x] =
+              ARGBTO32(g_palette[p_idx].a, g_palette[p_idx].r,
+                       g_palette[p_idx].g, g_palette[p_idx].b);
+        }
+
+      fbptr += g_graphics_state.pinfo.stride;
     }
 }
 
@@ -577,7 +446,6 @@ void i_set_palette(byte *doompalette)
       g_palette[i].r = gammatable[usegamma][*doompalette++] & ~3;
       g_palette[i].g = gammatable[usegamma][*doompalette++] & ~3;
       g_palette[i].b = gammatable[usegamma][*doompalette++] & ~3;
-      g_palette_rgb565[i] = rgb565_from_argb(&g_palette[i]);
     }
 
   palette_to_set = true;
@@ -812,8 +680,6 @@ void i_init_graphics(void)
 {
   uint8_t xscale;
   uint8_t yscale;
-  size_t min_fblen;
-  size_t min_stride;
   int err;
   byte *doompal;
 
@@ -866,35 +732,6 @@ void i_init_graphics(void)
       i_error("ioctl(FBIOGET_PLANEINFO) failed: %d\n", errno);
     }
 
-  if (!framebuffer_is_rgb565() && !framebuffer_is_32bpp())
-    {
-      i_error("Unsupported framebuffer format/depth: fmt=%u bpp=%u\n",
-              g_graphics_state.vinfo.fmt, g_graphics_state.pinfo.bpp);
-    }
-
-  min_stride = (size_t)g_graphics_state.vinfo.xres *
-               (g_graphics_state.pinfo.bpp / 8);
-  if (g_graphics_state.pinfo.stride < min_stride)
-    {
-      i_error("Framebuffer stride too small: stride=%u min=%zu\n",
-              g_graphics_state.pinfo.stride, min_stride);
-    }
-
-  min_fblen = (size_t)g_graphics_state.pinfo.stride *
-              g_graphics_state.vinfo.yres;
-  if (g_graphics_state.pinfo.fblen < min_fblen)
-    {
-      i_error("Framebuffer memory too small: fblen=%zu min=%zu\n",
-              g_graphics_state.pinfo.fblen, min_fblen);
-    }
-
-  g_graphics_state.render_width = SCREENWIDTH * g_graphics_state.scale;
-  g_graphics_state.render_height = SCREENHEIGHT * g_graphics_state.scale;
-  g_graphics_state.xoffset =
-      (g_graphics_state.vinfo.xres - g_graphics_state.render_width) / 2;
-  g_graphics_state.yoffset =
-      (g_graphics_state.vinfo.yres - g_graphics_state.render_height) / 2;
-
   /* Initialize frame buffer memory for actual rendering */
 
   g_graphics_state.fbmem =
@@ -930,7 +767,6 @@ void i_init_graphics(void)
 
   doompal = w_cache_lump_name(("PLAYPAL"), PU_CACHE);
   i_set_palette(doompal);
-  clear_framebuffer();
 
   update_grab();
 
