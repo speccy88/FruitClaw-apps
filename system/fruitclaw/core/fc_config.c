@@ -552,7 +552,10 @@ int fc_write_text_file_atomic(const char *path, const char *text)
   fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0664);
   if (fd < 0)
     {
-      return -errno;
+      int err = -errno;
+      fprintf(stderr, "fruitclaw: atomic write open failed tmp=%s "
+              "path=%s err=%d\n", tmp, path, err);
+      return err;
     }
 
   len = strlen(text);
@@ -562,6 +565,8 @@ int fc_write_text_file_atomic(const char *path, const char *text)
       int err = written < 0 ? -errno : -EIO;
       close(fd);
       unlink(tmp);
+      fprintf(stderr, "fruitclaw: atomic write failed tmp=%s path=%s "
+              "err=%d\n", tmp, path, err);
       return err;
     }
 
@@ -574,6 +579,8 @@ int fc_write_text_file_atomic(const char *path, const char *text)
     {
       int err = -errno;
       unlink(tmp);
+      fprintf(stderr, "fruitclaw: atomic write rename failed tmp=%s "
+              "path=%s err=%d\n", tmp, path, err);
       return err;
     }
 

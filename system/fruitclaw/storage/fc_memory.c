@@ -17,6 +17,7 @@ static int fc_read_tail_file(const char *path, size_t max_bytes, char *out,
   off_t end;
   off_t start;
   ssize_t nread;
+  size_t window;
   size_t want;
 
   if (path == NULL || out == NULL || out_len == 0)
@@ -44,40 +45,68 @@ static int fc_read_tail_file(const char *path, size_t max_bytes, char *out,
       max_bytes = out_len - 1;
     }
 
-  start = end > (off_t)max_bytes ? end - (off_t)max_bytes : 0;
-  if (lseek(fd, start, SEEK_SET) < 0)
+  window = max_bytes;
+  if (window == 0)
     {
-      int err = -errno;
       close(fd);
-      return err;
+      return 0;
     }
 
-  want = end - start;
-  nread = read(fd, out, want);
-  close(fd);
-
-  if (nread < 0)
+  for (; ; )
     {
-      return -errno;
-    }
-
-  out[nread] = '\0';
-  if (start > 0 && nread > 0)
-    {
-      char *next_line = strchr(out, '\n');
-
-      if (next_line != NULL)
+      start = end > (off_t)window ? end - (off_t)window : 0;
+      if (lseek(fd, start, SEEK_SET) < 0)
         {
-          size_t skip = (size_t)(next_line - out) + 1;
-
-          memmove(out, out + skip, (size_t)nread - skip + 1);
+          int err = -errno;
+          close(fd);
+          return err;
         }
-      else
+
+      want = end - start;
+      nread = read(fd, out, want);
+      if (nread < 0)
         {
+          int err = -errno;
+          close(fd);
+          return err;
+        }
+
+      out[nread] = '\0';
+      if (start > 0 && nread > 0)
+        {
+          char *next_line = strchr(out, '\n');
+
+          if (next_line != NULL)
+            {
+              size_t skip = (size_t)(next_line - out) + 1;
+
+              if (skip < (size_t)nread)
+                {
+                  memmove(out, out + skip, (size_t)nread - skip + 1);
+                  break;
+                }
+            }
+
+          if (window < out_len - 1)
+            {
+              size_t next_window = window * 2;
+
+              if (next_window <= window || next_window > out_len - 1)
+                {
+                  next_window = out_len - 1;
+                }
+
+              window = next_window;
+              continue;
+            }
+
           out[0] = '\0';
         }
+
+      break;
     }
 
+  close(fd);
   return 0;
 }
 

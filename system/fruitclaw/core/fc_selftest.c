@@ -49,6 +49,17 @@ static int check(bool expr, const char *name)
   return 0;
 }
 
+static int check_detail(bool expr, const char *name, const char *detail)
+{
+  if (!expr && detail != NULL && detail[0] != '\0')
+    {
+      printf("DETAIL: %s: %.512s\n", name, detail);
+      fflush(stdout);
+    }
+
+  return check(expr, name);
+}
+
 static int restore_disabled_marker(const char *path, bool existed)
 {
   if (path == NULL || path[0] == '\0')
@@ -531,11 +542,12 @@ int fc_selftest_main(void)
   fc_init_data_dir();
   memset(&tool_ctx, 0, sizeof(tool_ctx));
   tool_ctx.owner_mode = true;
+  tool_ctx.guarded = true;
   buf[0] = '\0';
-  ret |= check(fc_cap_execute_ctx(&tool_ctx, "file.write_limited",
-               "{\"path\":\"scripts/selftest_write.txt\","
-               "\"text\":\"claw.reply(\\\"selftest\\\")\\n\"}",
-               buf, sizeof(buf)) == 0, "file write limited");
+  ret |= check_detail(fc_cap_execute_ctx(&tool_ctx, "file.write_limited",
+                      "{\"path\":\"scripts/selftest_write.txt\","
+                      "\"text\":\"claw.reply(\\\"selftest\\\")\\n\"}",
+                      buf, sizeof(buf)) == 0, "file write limited", buf);
   buf[0] = '\0';
   ret |= check(fc_data_path("scripts/selftest_write.txt", path,
                             sizeof(path)) == 0 &&
@@ -581,12 +593,12 @@ int fc_selftest_main(void)
   fc_scheduler_remove("selftest-after");
   fc_scheduler_remove("selftest-boot");
   buf[0] = '\0';
-  ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.add",
-               "{\"id\":\"selftest-job\",\"type\":\"interval\","
-               "\"every_sec\":60,\"prompt\":\"selftest\"}",
-               buf, sizeof(buf)) == 0 &&
-               strstr(buf, "\"id\":\"selftest-job\"") != NULL,
-               "scheduler add");
+  ret |= check_detail(fc_cap_execute_ctx(&tool_ctx, "scheduler.add",
+                      "{\"id\":\"selftest-job\",\"type\":\"interval\","
+                      "\"every_sec\":60,\"prompt\":\"selftest\"}",
+                      buf, sizeof(buf)) == 0 &&
+                      strstr(buf, "\"id\":\"selftest-job\"") != NULL,
+                      "scheduler add", buf);
   buf[0] = '\0';
   ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.list", "{}",
                                   buf, sizeof(buf)) == 0 &&
@@ -729,14 +741,14 @@ int fc_selftest_main(void)
       }
 
     buf[0] = '\0';
-    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.write",
-                 "{\"name\":\"selftest_shell\",\"kind\":\"shell\","
-                 "\"description\":\"selftest generated shell\","
-                 "\"text\":\"echo selftest-shell\\n\","
-                 "\"validate\":false}",
-                 buf, sizeof(buf)) == 0 &&
-                 strstr(buf, "\"kind\":\"shell\"") != NULL,
-                 "script write shell");
+    ret |= check_detail(fc_cap_execute_ctx(&tool_ctx, "script.write",
+                        "{\"name\":\"selftest_shell\",\"kind\":\"shell\","
+                        "\"description\":\"selftest generated shell\","
+                        "\"text\":\"echo selftest-shell\\n\","
+                        "\"validate\":false}",
+                        buf, sizeof(buf)) == 0 &&
+                        strstr(buf, "\"kind\":\"shell\"") != NULL,
+                        "script write shell", buf);
     buf[0] = '\0';
     ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.read",
                  "{\"name\":\"selftest_shell\",\"kind\":\"shell\"}",
@@ -749,6 +761,21 @@ int fc_selftest_main(void)
                  buf, sizeof(buf)) == 0 &&
                  strstr(buf, "selftest_shell.nsh") != NULL,
                  "script list shell");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.run",
+                 "{\"name\":\"selftest_shell\",\"kind\":\"shell\","
+                 "\"args_json\":\"{bad\"}",
+                 buf, sizeof(buf)) < 0 &&
+                 strstr(buf, "script args invalid JSON") != NULL,
+                 "script run bad args rejected");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.schedule",
+                 "{\"name\":\"selftest_shell\",\"kind\":\"shell\","
+                 "\"type\":\"boot\",\"id\":\"selftest-script-bad\","
+                 "\"args_json\":\"{bad\"}",
+                 buf, sizeof(buf)) < 0 &&
+                 strstr(buf, "script args invalid JSON") != NULL,
+                 "script schedule bad args rejected");
     buf[0] = '\0';
     ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.schedule",
                  "{\"name\":\"selftest_shell\",\"kind\":\"shell\","

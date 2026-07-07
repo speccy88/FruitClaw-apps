@@ -243,6 +243,7 @@ static bool fc_agent_try_direct_scheduler_tool(const fc_event_t *ev,
     }
 
   fc_tool_context_from_event(ev, &ctx);
+  ctx.guarded = true;
   ret = fc_cap_execute_ctx(&ctx, tool, args, result, sizeof(result));
   fc_agent_record_tool_result(tool, ret);
   snprintf(reply, reply_len, "Scheduled tool %s -> %s: %.512s",

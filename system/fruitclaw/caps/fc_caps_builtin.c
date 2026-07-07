@@ -844,7 +844,7 @@ static int cap_file_write_limited(const fc_tool_context_t *ctx,
   cJSON_Delete(root);
   snprintf(out, out_len, ret == 0 ?
            "{\"ok\":true}" :
-           "{\"ok\":false,\"error\":\"write failed\"}");
+           "{\"ok\":false,\"error\":\"write failed\",\"code\":%d}", ret);
   return ret;
 }
 
@@ -1288,6 +1288,35 @@ static void fc_script_read_description(const char *path, char *desc,
     }
 }
 
+static int fc_script_validate_args_json(const char *args_json,
+                                        char *out, size_t out_len)
+{
+  cJSON *parsed;
+
+  if (args_json == NULL || args_json[0] == '\0')
+    {
+      return 0;
+    }
+
+  if (strlen(args_json) > 512)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"script args too large\"}");
+      return -ENOSPC;
+    }
+
+  parsed = cJSON_Parse(args_json);
+  if (parsed == NULL)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"script args invalid JSON\"}");
+      return -EINVAL;
+    }
+
+  cJSON_Delete(parsed);
+  return 0;
+}
+
 static int fc_script_run_generated(const fc_tool_context_t *ctx,
                                    fc_script_kind_t kind,
                                    const char *rel, const char *full,
@@ -1715,7 +1744,9 @@ static int cap_script_write(const fc_tool_context_t *ctx,
   cJSON_Delete(root);
   if (ret < 0)
     {
-      snprintf(out, out_len, "{\"ok\":false,\"error\":\"script write failed\"}");
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"script write failed\","
+               "\"code\":%d}", ret);
       return ret;
     }
 
@@ -2014,12 +2045,11 @@ static int cap_script_run(const fc_tool_context_t *ctx,
       script_args = "{}";
     }
 
-  if (strlen(script_args) > 512)
+  ret = fc_script_validate_args_json(script_args, out, out_len);
+  if (ret < 0)
     {
       cJSON_Delete(root);
-      snprintf(out, out_len,
-               "{\"ok\":false,\"error\":\"script args too large\"}");
-      return -ENOSPC;
+      return ret;
     }
 
   ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
@@ -2153,12 +2183,11 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
       return -EINVAL;
     }
 
-  if (strlen(script_args) > 512)
+  ret = fc_script_validate_args_json(script_args, out, out_len);
+  if (ret < 0)
     {
       cJSON_Delete(root);
-      snprintf(out, out_len,
-               "{\"ok\":false,\"error\":\"script args too large\"}");
-      return -ENOSPC;
+      return ret;
     }
 
   ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
@@ -2533,9 +2562,17 @@ static int cap_scheduler_add(const fc_tool_context_t *ctx,
 
   cJSON_Delete(root);
   fc_guard_disarm(guard_fd);
-  snprintf(out, out_len, ret == 0 ?
-           "{\"ok\":true,\"id\":\"%s\"}" :
-           "{\"ok\":false,\"error\":\"schedule add failed\"}", saved_id);
+  if (ret == 0)
+    {
+      snprintf(out, out_len, "{\"ok\":true,\"id\":\"%s\"}", saved_id);
+    }
+  else
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"schedule add failed\","
+               "\"code\":%d}", ret);
+    }
+
   return ret;
 }
 
