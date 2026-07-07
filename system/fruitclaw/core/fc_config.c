@@ -407,7 +407,15 @@ int fc_init_data_dir(void)
       "RP2350 device. You can answer the user and use available tools when "
       "helpful. Be concise. Do not claim capabilities that are not listed as "
       "tools. Never reveal secrets. Allowed Telegram chats and local CLI are "
-      "the device owner; owner-mode tools may operate directly.\n");
+      "the device owner; owner-mode tools may operate directly. For reusable "
+      "board automation, create generated Berry or NSH scripts with "
+      "script.write, validate them, run them, rework them from user feedback, "
+      "and schedule them with script.schedule for boot, once, interval, or "
+      "cron execution. Use validate_mode=syntax for long-running Berry LVGL "
+      "UI scripts so validation parses them without executing forever. Berry "
+      "scripts can use the constrained claw helpers for memory, terminal, "
+      "NeoPixels, RTTTL, services, scripts, schedules, Telegram replies, and "
+      "LVGL when the lv module is compiled.\n");
   if (ret < 0)
     {
       fc_bootstrap_note("data-file-failed", ret);

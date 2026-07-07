@@ -24,6 +24,7 @@ CONFIG_FRUITCLAW_MCP_SERVER=y
 CONFIG_FRUITCLAW_MCP_YOLO_MODE=y
 CONFIG_FRUITCLAW_MCP_MAX_RESPONSE=32768
 CONFIG_FRUITCLAW_MCP_TOOL_TIMEOUT_MS=30000
+CONFIG_FRUITCLAW_BERRY_EXPERIMENTAL_RUNNER=y
 ```
 
 This production operator profile keeps watchdog recovery enabled but disables
@@ -73,8 +74,8 @@ fruitclaw service <start|stop|restart|enable|disable> <telnetd|ftpd>
 ```
 
 FTP supports the full lifecycle through `ftpd_start` and `ftpd_stop`. Telnet
-uses NuttX `telnetd`; this build has no `telnetd_stop`, so Telnet stop/restart
-report unsupported while status, start, enable, and disable remain available.
+uses NuttX `telnetd` with a tmpfs PID file, so `telnetd -k` lets FruitClaw
+stop and restart the NSH Telnet daemon too.
 Disable state is stored under `services/*.disabled` in the FruitClaw data root.
 
 ## Storage
@@ -179,7 +180,10 @@ CONFIG_INTERPRETERS_BERRY_LVGL_MOUSE_DEVPATH="/dev/mouse0"
 ```
 
 FruitClaw's Berry runner is constrained to scripts under the data-root
-`scripts/` directory and exposes the constrained `claw` module.
+`scripts/` directory and exposes the constrained `claw` module. The direct
+FruitClaw runner is enabled in this profile, so `berry.run_script`,
+`fruitclaw berry-run`, generated Berry scripts, and scheduled generated Berry
+scripts all use the same guarded VM path.
 
 ## USB Host And Input
 

@@ -42,6 +42,7 @@ fruitclaw schedule add-interval <id> <seconds> <prompt>
 fruitclaw schedule add-once <id> <epoch-seconds> <prompt>
 fruitclaw schedule add-after <id> <seconds> <prompt>
 fruitclaw schedule add-cron <id> <expr> <prompt>
+fruitclaw schedule add-boot <id> <prompt>
 fruitclaw schedule remove <id>
 fruitclaw berry-run <path> [json-args]
 fruitclaw berry-smoke
@@ -75,6 +76,7 @@ fruitclaw service status
 fruitclaw service stop ftpd
 fruitclaw service start ftpd
 fruitclaw service restart ftpd
+fruitclaw service restart telnetd
 fruitclaw service disable telnetd
 fruitclaw service enable telnetd
 ```
@@ -85,9 +87,9 @@ FruitClaw boots without changing the firmware image.
 
 FTP has real `ftpd_start` and `ftpd_stop` commands in this build, so it
 supports start, stop, restart, enable, and disable. Telnet exposes a normal
-NSH service through `telnetd`, but this NuttX tree does not provide a
-`telnetd_stop` command. FruitClaw therefore supports Telnet start, status,
-enable, and disable; Telnet stop/restart return an explicit unsupported result.
+NSH service through `telnetd` and records the daemon PID in tmpfs, so
+FruitClaw can stop it with `telnetd -k` and restart it through the same
+service controller.
 
 ## MCP Endpoint
 
@@ -115,7 +117,7 @@ MCP tools run as owner and can mutate board state.
 
 ## Visible Capability Tools
 
-The current MCP `tools/list` surface contains 30 visible tools:
+The current MCP `tools/list` surface contains 31 visible tools:
 
 | Tool | Use |
 | --- | --- |
@@ -132,12 +134,13 @@ The current MCP `tools/list` surface contains 30 visible tools:
 | `web.home.write` | Replace the Markdown rendered by the root web page and served from `/site/home.md`. |
 | `script.list` | List generated Berry `.be` and NSH `.nsh` scripts under `scripts/generated/`. |
 | `script.read` | Read a generated Berry or NSH script for inspection. |
-| `script.write` | Create or replace a generated Berry or NSH script, with optional validation. |
-| `script.validate` | Run a generated Berry or NSH script through the guarded runner. |
+| `script.write` | Create or replace a generated Berry or NSH script, with optional run or Berry syntax validation. |
+| `script.validate` | Validate a generated script by guarded run, or use `mode:"syntax"` for Berry parse-only validation. |
+| `script.remove` | Remove a generated Berry or NSH script from `scripts/generated/`. |
 | `script.run` | Run a generated Berry or NSH script directly. |
-| `script.schedule` | Schedule a generated script once, on an interval, or by cron. |
+| `script.schedule` | Schedule a generated script at boot, once, on an interval, or by cron. |
 | `telegram.send_message` | Send plain text to an allowed Telegram chat. |
-| `scheduler.add` | Add interval, once, after, or cron schedules. |
+| `scheduler.add` | Add boot, interval, once, after, or cron schedules. |
 | `scheduler.list` | List configured schedules. |
 | `scheduler.remove` | Remove a schedule by ID. |
 | `berry.run_script` | Run a Berry script under the data-root `scripts/` directory. |
@@ -170,6 +173,7 @@ Prefer specific tools over shell commands:
 | Schedule work | `scheduler.add` |
 | Run Berry | `berry.run_script` or generated `script.run` with `kind=berry` |
 | Run generated NSH | `script.run` with `kind=shell` |
+| Remove generated script | `script.remove` |
 
 `terminal.run` has fast in-process handling for simple commands such as
 `help` and `uname -a`. It deliberately points `/dev` enumeration and DVI

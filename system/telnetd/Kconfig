@@ -34,6 +34,14 @@ config SYSTEM_TELNETD_PORT
 		The telnet daemon will listen on this TCP port number for connections.
 		Default: 23
 
+config SYSTEM_TELNETD_PID_PATH
+	string "Telnetd daemon PID file"
+	default "/tmp/telnetd.pid"
+	---help---
+		Path where the telnetd application records the daemon PID when it is
+		started in daemon mode. The same application can later be called with
+		-k to stop that daemon.
+
 config SYSTEM_TELNETD_SESSION_PRIORITY
 	int "Telnetd session task priority"
 	default 100

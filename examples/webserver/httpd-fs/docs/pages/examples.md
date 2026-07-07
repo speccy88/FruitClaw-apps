@@ -141,11 +141,14 @@ fruitclaw schedule list
 fruitclaw schedule add-after reminder 60 "Send a reminder"
 fruitclaw schedule add-interval heartbeat 3600 "Run heartbeat"
 fruitclaw schedule add-cron morning "0 8 * * *" "Run morning workflow"
+fruitclaw schedule add-boot ui "tool:script.run {\"path\":\"generated/ui.be\",\"kind\":\"berry\"}"
 fruitclaw schedule remove reminder
 ```
 
-Plain schedule prompts are delivered directly at fire time. Prefix the prompt
-with `agent:` only when the scheduled job should wake DeepSeek and use tools.
+Plain schedule prompts are delivered directly at fire time. Boot schedules run
+once each time FruitClaw starts, which is the intended path for generated LVGL
+UIs and maintenance scripts. Prefix the prompt with `agent:` only when the
+scheduled job should wake DeepSeek and use tools.
 
 ## Berry
 
@@ -166,7 +169,36 @@ fruitclaw berry-run example.be '{}'
 ```
 
 The constrained `claw` module includes `args()`, `reply()`, `tool()`,
-`memory_append()`, `terminal_run()`, `neopixels_set()`, and `schedule_add()`.
+`memory_append()`, `terminal_run()`, `neopixels_set()`, `neopixels_off()`,
+`neopixels_effect()`, `schedule_add()`, `script_run()`, `rtttl_play()`,
+`service_control()`, and `telegram_send()`.
+
+Generated script workflow through MCP:
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"script.write","arguments":{"name":"leds_off","kind":"berry","description":"turn all NeoPixels off","text":"import claw\nclaw.reply(claw.neopixels_off())\n"}}}
+```
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"script.schedule","arguments":{"name":"leds_off","kind":"berry","type":"interval","every_sec":300,"id":"leds-off-every-5m"}}}
+```
+
+For a generated LVGL UI, syntax-validate first so validation does not run the
+UI loop forever:
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"script.write","arguments":{"name":"hello_ui","kind":"berry","description":"simple LVGL hello screen","validate_mode":"syntax","text":"import lv\nlv.start()\nscr = lv.scr_act()\nlabel = lv.label(scr)\nlabel.set_text(\"FruitClaw ready\")\nlabel.center()\nlv.run()\n"}}}
+```
+
+Then run it immediately with `script.run`, or autostart it on every boot:
+
+```json
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"script.schedule","arguments":{"name":"hello_ui","kind":"berry","type":"boot","id":"hello-ui-boot"}}}
+```
+
+Use `script.read` to inspect, `script.write` to rework, `script.validate` to
+test after edits, `script.run` to execute immediately, and `script.remove` to
+delete scripts that are no longer wanted.
 
 Sources: `apps/system/fruitclaw/README.md`,
 `apps/system/fruitclaw/fruitclaw_main.c`,

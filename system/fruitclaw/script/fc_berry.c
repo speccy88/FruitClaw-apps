@@ -240,6 +240,54 @@ int fc_berry_run_file(const fc_tool_context_t *ctx, const char *path,
 #endif
 }
 
+int fc_berry_check_file(const char *path, char *out, size_t out_len)
+{
+  char full[FC_PATH_LEN];
+  int ret;
+
+  if (out == NULL || out_len == 0)
+    {
+      return -EINVAL;
+    }
+
+#if defined(CONFIG_FRUITCLAW_ENABLE_BERRY) && \
+    defined(CONFIG_FRUITCLAW_BERRY_EXPERIMENTAL_RUNNER)
+  fc_berry_record_start(path);
+  ret = fc_berry_resolve_path(path, full, sizeof(full));
+  if (ret < 0)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"mode\":\"syntax\","
+               "\"error\":\"script path denied\"}");
+      return fc_berry_record_result(ret);
+    }
+
+  ret = berry_check_file(full, out, out_len);
+  return fc_berry_record_result(ret);
+#elif defined(CONFIG_FRUITCLAW_ENABLE_BERRY)
+  fc_berry_record_start(path);
+  ret = fc_berry_resolve_path(path, full, sizeof(full));
+  if (ret < 0)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"mode\":\"syntax\","
+               "\"error\":\"script path denied\"}");
+      return fc_berry_record_result(ret);
+    }
+
+  snprintf(out, out_len,
+           "{\"ok\":false,\"mode\":\"syntax\","
+           "\"error\":\"Berry runner integration disabled\"}");
+  return fc_berry_record_result(-ENOSYS);
+#else
+  (void)path;
+  snprintf(out, out_len,
+           "{\"ok\":false,\"mode\":\"syntax\","
+           "\"error\":\"Berry support disabled\"}");
+  return fc_berry_record_result(-ENOSYS);
+#endif
+}
+
 int fc_berry_status_format(char *out, size_t out_len)
 {
   unsigned long calls;

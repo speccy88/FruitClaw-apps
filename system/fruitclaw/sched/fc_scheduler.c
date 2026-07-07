@@ -388,6 +388,14 @@ int fc_scheduler_load(void)
                      sizeof(job->expr));
           job->last_minute_key = -1;
         }
+      else if (strcmp(type, "boot") == 0)
+        {
+          job->type = FC_SCHED_BOOT;
+        }
+      else
+        {
+          memset(job, 0, sizeof(*job));
+        }
     }
 
   pthread_mutex_unlock(&g_sched_lock);
@@ -456,10 +464,14 @@ int fc_scheduler_save(void)
           cJSON_AddNumberToObject(obj, "at_epoch",
                                   (double)g_jobs[i].at_epoch);
         }
-      else
+      else if (g_jobs[i].type == FC_SCHED_CRON)
         {
           cJSON_AddStringToObject(obj, "type", "cron");
           cJSON_AddStringToObject(obj, "expr", g_jobs[i].expr);
+        }
+      else
+        {
+          cJSON_AddStringToObject(obj, "type", "boot");
         }
 
       cJSON_AddItemToArray(arr, obj);
@@ -638,6 +650,46 @@ int fc_scheduler_add_once(const char *id, int64_t epoch, const char *prompt)
   return fc_scheduler_add_once_ctx(id, epoch, prompt, NULL);
 }
 
+int fc_scheduler_add_boot_ctx(const char *id, const char *prompt,
+                              const fc_tool_context_t *ctx)
+{
+  fc_schedule_t *job;
+  int ret;
+
+  if (id == NULL || prompt == NULL)
+    {
+      return -EINVAL;
+    }
+
+  ret = fc_scheduler_lock_timed();
+  if (ret < 0)
+    {
+      return ret;
+    }
+
+  job = fc_alloc_job(id);
+  if (job == NULL)
+    {
+      pthread_mutex_unlock(&g_sched_lock);
+      return -ENOSPC;
+    }
+
+  fc_strlcpy(job->id, id, sizeof(job->id));
+  fc_strlcpy(job->prompt, prompt, sizeof(job->prompt));
+  job->type = FC_SCHED_BOOT;
+  job->enabled = true;
+  job->last_minute_key = -1;
+  fc_schedule_set_context(job, ctx);
+  pthread_mutex_unlock(&g_sched_lock);
+
+  return fc_scheduler_save();
+}
+
+int fc_scheduler_add_boot(const char *id, const char *prompt)
+{
+  return fc_scheduler_add_boot_ctx(id, prompt, NULL);
+}
+
 int fc_scheduler_remove(const char *id)
 {
   fc_schedule_t *job;
@@ -711,13 +763,23 @@ int fc_scheduler_list(char *out, size_t out_len)
                        g_jobs[i].chat_id[0] ? g_jobs[i].chat_id : "-",
                        g_jobs[i].owner_mode ? "yes" : "no");
         }
-      else
+      else if (g_jobs[i].type == FC_SCHED_CRON)
         {
           n = snprintf(out + off, out_len - off,
                        "%s %s cron expr=\"%s\" ch=%s chat=%s owner=%s\n",
                        g_jobs[i].enabled ? "on" : "off",
                        g_jobs[i].id,
                        g_jobs[i].expr,
+                       g_jobs[i].channel,
+                       g_jobs[i].chat_id[0] ? g_jobs[i].chat_id : "-",
+                       g_jobs[i].owner_mode ? "yes" : "no");
+        }
+      else
+        {
+          n = snprintf(out + off, out_len - off,
+                       "%s %s boot ch=%s chat=%s owner=%s\n",
+                       g_jobs[i].enabled ? "on" : "off",
+                       g_jobs[i].id,
                        g_jobs[i].channel,
                        g_jobs[i].chat_id[0] ? g_jobs[i].chat_id : "-",
                        g_jobs[i].owner_mode ? "yes" : "no");
@@ -772,9 +834,42 @@ static int fc_emit_schedule(const fc_schedule_t *job)
   return ret;
 }
 
+static void fc_scheduler_emit_boot_jobs(void)
+{
+  unsigned int i;
+  int ret;
+
+  ret = fc_scheduler_lock_timed();
+  if (ret < 0)
+    {
+      fc_scheduler_record_emit("boot-scan", ret);
+      return;
+    }
+
+  for (i = 0; i < FC_MAX_SCHEDULES; i++)
+    {
+      fc_schedule_t snapshot;
+
+      if (!g_jobs[i].used || !g_jobs[i].enabled ||
+          g_jobs[i].type != FC_SCHED_BOOT)
+        {
+          continue;
+        }
+
+      snapshot = g_jobs[i];
+      pthread_mutex_unlock(&g_sched_lock);
+      fc_emit_schedule(&snapshot);
+      pthread_mutex_lock(&g_sched_lock);
+    }
+
+  pthread_mutex_unlock(&g_sched_lock);
+}
+
 static void *fc_scheduler_thread_main(void *arg)
 {
   (void)arg;
+
+  fc_scheduler_emit_boot_jobs();
 
   for (; ; )
     {
@@ -823,7 +918,7 @@ static void *fc_scheduler_thread_main(void *arg)
                   pthread_mutex_lock(&g_sched_lock);
                 }
             }
-          else
+          else if (g_jobs[i].type == FC_SCHED_CRON)
             {
               minute_key = tmv.tm_yday * 24 * 60 + tmv.tm_hour * 60 +
                            tmv.tm_min;

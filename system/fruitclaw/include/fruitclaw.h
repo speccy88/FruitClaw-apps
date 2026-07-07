@@ -372,7 +372,8 @@ typedef enum fc_schedule_type_e
 {
   FC_SCHED_INTERVAL = 0,
   FC_SCHED_ONCE,
-  FC_SCHED_CRON
+  FC_SCHED_CRON,
+  FC_SCHED_BOOT
 } fc_schedule_type_t;
 
 typedef struct fc_schedule_s
@@ -562,6 +563,9 @@ int fc_scheduler_add_once(const char *id, int64_t epoch,
 int fc_scheduler_add_once_ctx(const char *id, int64_t epoch,
                               const char *prompt,
                               const fc_tool_context_t *ctx);
+int fc_scheduler_add_boot(const char *id, const char *prompt);
+int fc_scheduler_add_boot_ctx(const char *id, const char *prompt,
+                              const fc_tool_context_t *ctx);
 int fc_scheduler_remove(const char *id);
 int fc_scheduler_list(char *out, size_t out_len);
 int fc_scheduler_worker_start(void);
@@ -571,6 +575,7 @@ bool fc_cron_matches(const char *expr, const struct tm *tm);
 
 int fc_berry_run_file(const fc_tool_context_t *ctx, const char *path,
                       const char *args_json, char *out, size_t out_len);
+int fc_berry_check_file(const char *path, char *out, size_t out_len);
 int fc_berry_status_format(char *out, size_t out_len);
 void fc_berry_clear_status(void);
 void fc_berry_status(FILE *out);

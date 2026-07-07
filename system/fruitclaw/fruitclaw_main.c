@@ -60,6 +60,7 @@ static char g_bootstrap_stage[32] = "idle";
 static int g_bootstrap_last_ret;
 static bool g_boot_network_started;
 static bool g_boot_network_done;
+static bool g_boot_network_ok;
 static bool g_boot_defer_session_guard;
 static int64_t g_runtime_start_ms;
 static pthread_mutex_t g_network_recovery_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -101,6 +102,26 @@ static unsigned int g_service_bad_probes;
 static int64_t g_telnetd_last_ms;
 static int64_t g_ftpd_last_ms;
 static int64_t g_services_probe_ms;
+
+#ifdef CONFIG_FRUITCLAW_ENABLE_SESSION_GUARD
+static void fc_boot_require_network_or_recover(int ret, const char *stage)
+{
+  if (ret == 0)
+    {
+      return;
+    }
+
+  FC_LOGE("boot network stage %s failed ret=%d; resetting into app",
+          stage ? stage : "unknown", ret);
+  fc_guard_force_recovery(FC_GUARD_STAGE_NETREC);
+}
+#else
+static void fc_boot_require_network_or_recover(int ret, const char *stage)
+{
+  (void)ret;
+  (void)stage;
+}
+#endif
 
 enum fc_service_id_e
 {
@@ -148,6 +169,7 @@ static void usage(void)
   printf("  fruitclaw schedule add-once <id> <epoch-seconds> <prompt>\n");
   printf("  fruitclaw schedule add-after <id> <seconds> <prompt>\n");
   printf("  fruitclaw schedule add-cron <id> <expr> <prompt>\n");
+  printf("  fruitclaw schedule add-boot <id> <prompt>\n");
   printf("  fruitclaw schedule remove <id>\n");
   printf("  fruitclaw berry-run <path> [json-args]\n");
   printf("  fruitclaw berry-smoke\n");
@@ -784,6 +806,7 @@ static void *fc_boot_network_main(void *arg)
           FC_LOGW("boot continuing without confirmed Wi-Fi");
           fc_operator_progress_mark("wifi-failed");
           network_ret = -ENETDOWN;
+          fc_boot_require_network_or_recover(network_ret, "wifi");
         }
     }
 #endif
@@ -833,7 +856,12 @@ static void *fc_boot_network_main(void *arg)
         if (attempt < FC_SERVICE_BOOT_RETRIES)
           {
             sleep(FC_SERVICE_BOOT_RETRY_DELAY_SEC);
-          }
+        }
+    }
+
+    if (services_ret != 0)
+      {
+        fc_boot_require_network_or_recover(services_ret, "services");
       }
   }
 
@@ -841,6 +869,7 @@ static void *fc_boot_network_main(void *arg)
 
   pthread_mutex_lock(&g_boot_network_lock);
   g_boot_network_done = true;
+  g_boot_network_ok = network_ret == 0;
   pthread_mutex_unlock(&g_boot_network_lock);
   fc_guard_session_heartbeat(network_ret == 0 ? "network-ready" :
                              "network-attempted");
@@ -885,6 +914,28 @@ static bool fc_boot_network_active_snapshot(void)
   active = g_boot_network_started && !g_boot_network_done;
   pthread_mutex_unlock(&g_boot_network_lock);
   return active;
+}
+
+static void fc_boot_network_status_snapshot(bool *started, bool *done,
+                                            bool *ok)
+{
+  pthread_mutex_lock(&g_boot_network_lock);
+  if (started != NULL)
+    {
+      *started = g_boot_network_started;
+    }
+
+  if (done != NULL)
+    {
+      *done = g_boot_network_done;
+    }
+
+  if (ok != NULL)
+    {
+      *ok = g_boot_network_ok;
+    }
+
+  pthread_mutex_unlock(&g_boot_network_lock);
 }
 
 static void fc_bootstrap_set_stage(const char *stage, int ret)
@@ -2740,7 +2791,7 @@ static bool fc_service_boot_default(enum fc_service_id_e id)
 
 static bool fc_service_stop_supported(enum fc_service_id_e id)
 {
-  return id == FC_SERVICE_FTPD && fc_service_compiled(id);
+  return fc_service_compiled(id);
 }
 
 static int fc_service_disabled_path(enum fc_service_id_e id, char *path,
@@ -2913,7 +2964,12 @@ static int fc_service_stop_id(enum fc_service_id_e id)
 
   if (id == FC_SERVICE_TELNETD)
     {
-      return -ENOTSUP;
+      fc_bootstrap_set_stage("telnetd-stop", 0);
+      fc_guard_session_heartbeat("telnetd-stop");
+      ret = system("telnetd -k");
+      ret = ret == 0 ? 0 : -EIO;
+      fc_service_mark_stopped(id, ret);
+      return ret;
     }
 
   fc_bootstrap_set_stage("ftpd-stop", 0);
@@ -2939,6 +2995,11 @@ static int fc_service_restart_id(enum fc_service_id_e id)
     }
 
   ret = fc_service_stop_id(id);
+  if (ret < 0)
+    {
+      return ret;
+    }
+
   usleep(200000);
   ret = fc_service_start_id(id);
   if (ret == 0)
@@ -3120,7 +3181,7 @@ int fc_services_status_json(char *out, size_t out_len)
            "\"telnetd\":{\"compiled\":%s,\"boot_default\":%s,"
            "\"enabled\":%s,\"autostart\":%s,\"started\":%s,"
            "\"listening\":%s,\"start_supported\":%s,"
-           "\"stop_supported\":false,\"attempts\":%lu,"
+           "\"stop_supported\":%s,\"attempts\":%lu,"
            "\"restarts\":%lu,\"last_ret\":%d,\"probe_ret\":%d,"
            "\"last_age_ms\":%lld},"
            "\"ftpd\":{\"compiled\":%s,\"boot_default\":%s,"
@@ -3140,6 +3201,7 @@ int fc_services_status_json(char *out, size_t out_len)
            telnetd_started ? "true" : "false",
            telnetd_listening ? "true" : "false",
            fc_service_compiled(FC_SERVICE_TELNETD) ? "true" : "false",
+           fc_service_stop_supported(FC_SERVICE_TELNETD) ? "true" : "false",
            telnetd_attempts, telnetd_restarts, telnetd_ret,
            telnetd_probe_ret,
            telnetd_ms > 0 ? (long long)(now - telnetd_ms) : -1,
@@ -3209,19 +3271,18 @@ int fc_service_control(const char *service_name, const char *action,
   else if (strcmp(verb, "stop") == 0)
     {
       ret = fc_service_stop_id(id);
-      if (ret == -ENOTSUP && id == FC_SERVICE_TELNETD)
+      if (ret < 0 && id == FC_SERVICE_TELNETD)
         {
-          note = "NuttX telnetd has no stop command in this build; "
-                 "disable prevents next boot autostart.";
+          note = "telnetd stop uses telnetd -k and requires a live "
+                 "PID file.";
         }
     }
   else if (strcmp(verb, "restart") == 0)
     {
       ret = fc_service_restart_id(id);
-      if (ret == -ENOTSUP && id == FC_SERVICE_TELNETD)
+      if (ret < 0 && id == FC_SERVICE_TELNETD)
         {
-          note = "NuttX telnetd cannot be restarted without a reboot in "
-                 "this build.";
+          note = "telnetd restart uses telnetd -k followed by telnetd -4.";
         }
     }
   else if (strcmp(verb, "enable") == 0)
@@ -3452,6 +3513,17 @@ static int cmd_status(bool include_net)
          "disabled"
 #endif
          );
+    {
+      bool boot_started;
+      bool boot_done;
+      bool boot_ok;
+
+      fc_boot_network_status_snapshot(&boot_started, &boot_done, &boot_ok);
+      printf("  boot_network: started=%s done=%s ok=%s\n",
+             boot_started ? "yes" : "no",
+             boot_done ? "yes" : "no",
+             boot_ok ? "yes" : "no");
+    }
   if (!bootstrap_ready)
     {
       printf("  wifi_autostart: %s (startup pending)\n",
@@ -3886,6 +3958,14 @@ static int cmd_schedule(int argc, char *argv[])
     {
       join_args(argc, argv, 5, prompt, sizeof(prompt));
       ret = fc_scheduler_add_cron(argv[3], argv[4], prompt);
+      printf("%s\n", ret == 0 ? "schedule added" : "schedule add failed");
+      return fc_cli_guard_end(&guard, ret < 0 ? 1 : 0);
+    }
+
+  if (strcmp(argv[2], "add-boot") == 0 && argc >= 5)
+    {
+      join_args(argc, argv, 4, prompt, sizeof(prompt));
+      ret = fc_scheduler_add_boot(argv[3], prompt);
       printf("%s\n", ret == 0 ? "schedule added" : "schedule add failed");
       return fc_cli_guard_end(&guard, ret < 0 ? 1 : 0);
     }

@@ -240,6 +240,7 @@ fruitclaw neopixels off
 fruitclaw service start ftpd
 fruitclaw service stop ftpd
 fruitclaw service restart ftpd
+fruitclaw service restart telnetd
 fruitclaw service disable telnetd
 fruitclaw service enable telnetd
 ```
@@ -253,9 +254,9 @@ by MCP `service.status` and `service.control`.  Disable writes a persistent
 marker under `services/` in the active FruitClaw data root, preventing
 autostart on later boots without changing the firmware image.  FTP supports
 start, stop, restart, enable, and disable through the compiled `ftpd_start` and
-`ftpd_stop` commands.  Telnet uses NuttX `telnetd`; this tree has no
-`telnetd_stop`, so Telnet stop/restart return an explicit unsupported result
-while status, start, enable, and disable remain available.
+`ftpd_stop` commands.  Telnet supports the same lifecycle through
+`telnetd -k`, which stops the daemon recorded in the configured Telnet PID
+file before FruitClaw starts it again.
 
 Schedules:
 
@@ -265,11 +266,13 @@ fruitclaw schedule add-interval heartbeat 3600 "Run heartbeat"
 fruitclaw schedule add-after reminder 60 "Send a reminder"
 fruitclaw schedule add-once exact 4102444800 "Run at epoch time"
 fruitclaw schedule add-cron morning "0 8 * * *" "Run morning workflow"
+fruitclaw schedule add-boot ui "tool:script.run {\"path\":\"generated/ui.be\",\"kind\":\"berry\"}"
 fruitclaw schedule remove heartbeat
 ```
 
-The `scheduler.add` tool accepts the same schedule types.  For natural
-Telegram requests such as "remind me in 60 seconds", use
+The `scheduler.add` tool accepts the same schedule types, including `boot` for
+runtime autostart jobs. For natural Telegram requests such as "remind me in 60
+seconds", use
 `{"type":"once","after_sec":60,"prompt":"..."}`; for exact one-shot times, use
 `at_epoch`.  Plain schedule prompts are delivered directly at fire time so
 simple reminders cannot wedge the LLM path.  Prefix the prompt with `agent:`
@@ -284,8 +287,10 @@ fruitclaw berry-run morning.be '{}'
 
 Berry scripts are resolved under `scripts/` in the active FruitClaw data root.
 The embedded runner exposes a constrained `claw` module with `args()`,
-`reply()`, `tool()`, `memory_append()`, `terminal_run()`, `neopixels_set()`,
-and `schedule_add()`.
+`reply()`, `tool()`, `memory_append()`, `terminal_run()`,
+`neopixels_set()`, `neopixels_off()`, `neopixels_effect()`,
+`schedule_add()`, `script_run()`, `rtttl_play()`, `service_control()`, and
+`telegram_send()`.
 
 The direct Berry VM wrapper is enabled by
 `CONFIG_FRUITCLAW_BERRY_EXPERIMENTAL_RUNNER`.  The VM runs on a dedicated
@@ -307,17 +312,47 @@ That can be written through MCP with `file.write_limited` under
 `scripts/example.be`, then run with `berry.run_script`.
 
 Generated script tools use `scripts/generated/` and add a tighter workflow:
-`script.write`, `script.read`, `script.validate`, `script.run`, and
-`script.schedule` support Berry `.be` scripts and NSH `.nsh` scripts.  A
-scheduled generated script fires `script.run` directly, so the scheduler does
-not need another LLM turn to run the script.
+`script.write`, `script.read`, `script.validate`, `script.run`,
+`script.schedule`, and `script.remove` support Berry `.be` scripts and NSH
+`.nsh` scripts.  A scheduled generated script fires `script.run` directly, so
+the scheduler does not need another LLM turn to run the script. Use
+`script.schedule` with `{"type":"boot"}` to autostart a generated maintenance
+script or LVGL UI every time FruitClaw starts.
+
+Example generated Berry script for an MCP or Telegram request like "make a
+script that turns the NeoPixels off":
+
+```be
+import claw
+claw.reply(claw.neopixels_off())
+```
+
+For a rainbow script:
+
+```be
+import claw
+claw.reply(claw.neopixels_effect("rainbow"))
+```
+
+After `script.write`, use `script.validate` and `script.run` to check the
+behavior. Short maintenance scripts can keep the default run validation. For
+LVGL UIs or other long-running Berry scripts, pass
+`"validate_mode":"syntax"` to `script.write`, or `"mode":"syntax"` to
+`script.validate`, so FruitClaw parses the script without executing
+`lv.run()` forever. If the user says the result is not right, read the script
+with `script.read`, rewrite it with `script.write`, and validate again.
+Schedule it with `script.schedule` using `boot`, `once`, `interval`, or
+`cron`.
 
 As of the current hardware slice, `fruitclaw berry-smoke`,
-`fruitclaw selftest`, MCP `berry.run_script`, `import claw`, and a Berry script
-calling back into `terminal.run` have been verified on the Fruit Jam RP2350.
-The generated `script.run` path is a source-level hardening addition for the
-next image and still needs the same hardware smoke test. More complex
-Berry/LVGL integration is still bring-up work.
+`fruitclaw selftest`, MCP `berry.run_script`, `import claw`, and Berry scripts
+calling back into `terminal.run`, `scheduler.add`, and the generated script
+workflow have been covered by code or hardware smoke tests. The offline
+selftest also proves that a scheduled `tool:...` event runs directly with the
+creator's owner chat/session context, that both `scheduler.add` and
+`script.schedule` can persist boot/autostart jobs, and that generated scripts
+can be listed, read, scheduled, and removed through public tools. More complex
+Berry/LVGL UI generation remains active bring-up work.
 
 ## Recovery Model
 

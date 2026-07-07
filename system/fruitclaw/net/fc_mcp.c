@@ -387,6 +387,7 @@ static bool fc_mcp_tool_has_own_guard(const char *name)
           strcmp(name, "neopixels.off") == 0 ||
           strcmp(name, "neopixels.effect") == 0 ||
           strcmp(name, "file.write_limited") == 0 ||
+          strcmp(name, "script.remove") == 0 ||
           strcmp(name, "device.write") == 0 ||
           strcmp(name, "scheduler.add") == 0 ||
           strcmp(name, "scheduler.remove") == 0 ||
@@ -399,6 +400,7 @@ static bool fc_mcp_tool_needs_outer_guard(const char *name)
          (strcmp(name, "device.read") == 0 ||
           strcmp(name, "device.write") == 0 ||
           strcmp(name, "file.write_limited") == 0 ||
+          strcmp(name, "script.remove") == 0 ||
           strcmp(name, "scheduler.add") == 0 ||
           strcmp(name, "scheduler.remove") == 0 ||
           strcmp(name, "terminal.run") == 0 ||

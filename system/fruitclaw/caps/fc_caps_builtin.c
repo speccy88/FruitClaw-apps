@@ -54,6 +54,12 @@ typedef enum fc_script_kind_e
   FC_SCRIPT_KIND_SHELL
 } fc_script_kind_t;
 
+typedef enum fc_script_validation_mode_e
+{
+  FC_SCRIPT_VALIDATION_RUN = 0,
+  FC_SCRIPT_VALIDATION_SYNTAX
+} fc_script_validation_mode_t;
+
 struct fc_color_s
 {
   const char *name;
@@ -992,6 +998,12 @@ static const char *fc_script_kind_ext(fc_script_kind_t kind)
   return kind == FC_SCRIPT_KIND_SHELL ? ".nsh" : ".be";
 }
 
+static const char *fc_script_validation_mode_name(
+                                    fc_script_validation_mode_t mode)
+{
+  return mode == FC_SCRIPT_VALIDATION_SYNTAX ? "syntax" : "run";
+}
+
 static int fc_script_kind_from_arg(const char *kind,
                                    fc_script_kind_t *out)
 {
@@ -1016,6 +1028,29 @@ static int fc_script_kind_from_arg(const char *kind,
       strcmp(kind, "sh") == 0)
     {
       *out = FC_SCRIPT_KIND_SHELL;
+      return 0;
+    }
+
+  return -EINVAL;
+}
+
+static int fc_script_validation_mode_from_arg(const char *mode,
+                                      fc_script_validation_mode_t *out)
+{
+  if (out == NULL)
+    {
+      return -EINVAL;
+    }
+
+  if (mode == NULL || mode[0] == '\0' || strcmp(mode, "run") == 0)
+    {
+      *out = FC_SCRIPT_VALIDATION_RUN;
+      return 0;
+    }
+
+  if (strcmp(mode, "syntax") == 0)
+    {
+      *out = FC_SCRIPT_VALIDATION_SYNTAX;
       return 0;
     }
 
@@ -1296,6 +1331,7 @@ static int fc_script_run_generated(const fc_tool_context_t *ctx,
 static int fc_script_add_validation(cJSON *root,
                                     const fc_tool_context_t *ctx,
                                     fc_script_kind_t kind,
+                                    fc_script_validation_mode_t mode,
                                     const char *rel, const char *full,
                                     int *validation_ret)
 {
@@ -1315,8 +1351,31 @@ static int fc_script_add_validation(cJSON *root,
       return -ENOMEM;
     }
 
-  ret = fc_script_run_generated(ctx, kind, rel, full, "{}",
-                                run_out, CONFIG_FRUITCLAW_MAX_JSON);
+  cJSON_AddStringToObject(root, "validation_mode",
+                          fc_script_validation_mode_name(mode));
+  if (mode == FC_SCRIPT_VALIDATION_SYNTAX)
+    {
+      if (kind == FC_SCRIPT_KIND_BERRY)
+        {
+          (void)ctx;
+          (void)full;
+          ret = fc_berry_check_file(rel, run_out,
+                                    CONFIG_FRUITCLAW_MAX_JSON);
+        }
+      else
+        {
+          snprintf(run_out, CONFIG_FRUITCLAW_MAX_JSON,
+                   "{\"ok\":false,\"mode\":\"syntax\","
+                   "\"error\":\"syntax validation supports Berry only\"}");
+          ret = -ENOSYS;
+        }
+    }
+  else
+    {
+      ret = fc_script_run_generated(ctx, kind, rel, full, "{}",
+                                    run_out, CONFIG_FRUITCLAW_MAX_JSON);
+    }
+
   *validation_ret = ret;
   parsed = cJSON_Parse(run_out);
   if (parsed != NULL)
@@ -1558,11 +1617,13 @@ static int cap_script_write(const fc_tool_context_t *ctx,
   const char *text;
   const char *description;
   const char *kind_arg;
+  const char *validation_mode_arg;
   char leaf[FC_SCRIPT_NAME_MAX + 4];
   char rel[FC_PATH_LEN];
   char full[FC_PATH_LEN];
   fc_script_kind_t requested_kind;
   fc_script_kind_t kind;
+  fc_script_validation_mode_t validation_mode = FC_SCRIPT_VALIDATION_RUN;
   char *content;
   char *printed;
   bool validate = true;
@@ -1590,6 +1651,8 @@ static int cap_script_write(const fc_tool_context_t *ctx,
   description = cJSON_GetStringValue(cJSON_GetObjectItem(root,
                                                          "description"));
   kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
+  validation_mode_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root,
+                                                                 "validate_mode"));
   validate_item = cJSON_GetObjectItem(root, "validate");
   if (cJSON_IsBool(validate_item))
     {
@@ -1602,6 +1665,16 @@ static int cap_script_write(const fc_tool_context_t *ctx,
       snprintf(out, out_len,
                "{\"ok\":false,\"error\":\"missing or too large text\"}");
       return -EINVAL;
+    }
+
+  ret = fc_script_validation_mode_from_arg(validation_mode_arg,
+                                           &validation_mode);
+  if (ret < 0)
+    {
+      cJSON_Delete(root);
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"bad validation mode\"}");
+      return ret;
     }
 
   ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
@@ -1658,7 +1731,8 @@ static int cap_script_write(const fc_tool_context_t *ctx,
   cJSON_AddBoolToObject(reply, "validated", false);
   if (validate)
     {
-      ret = fc_script_add_validation(reply, ctx, kind, rel, full,
+      ret = fc_script_add_validation(reply, ctx, kind, validation_mode,
+                                     rel, full,
                                      &validation_ret);
       cJSON_ReplaceItemInObject(reply, "validated",
                                 cJSON_CreateBool(validation_ret == 0));
@@ -1699,11 +1773,13 @@ static int cap_script_validate(const fc_tool_context_t *ctx,
   cJSON *reply;
   const char *name;
   const char *kind_arg;
+  const char *validation_mode_arg;
   char leaf[FC_SCRIPT_NAME_MAX + 4];
   char rel[FC_PATH_LEN];
   char full[FC_PATH_LEN];
   fc_script_kind_t requested_kind;
   fc_script_kind_t kind;
+  fc_script_validation_mode_t validation_mode = FC_SCRIPT_VALIDATION_RUN;
   char *printed;
   int validation_ret = 0;
   int ret;
@@ -1720,6 +1796,24 @@ static int cap_script_validate(const fc_tool_context_t *ctx,
     }
 
   kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
+  validation_mode_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root,
+                                                                 "mode"));
+  if (validation_mode_arg == NULL)
+    {
+      validation_mode_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root,
+                                                   "validate_mode"));
+    }
+
+  ret = fc_script_validation_mode_from_arg(validation_mode_arg,
+                                           &validation_mode);
+  if (ret < 0)
+    {
+      cJSON_Delete(root);
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"bad validation mode\"}");
+      return ret;
+    }
+
   ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
   if (ret == 0)
     {
@@ -1750,7 +1844,8 @@ static int cap_script_validate(const fc_tool_context_t *ctx,
   cJSON_AddStringToObject(reply, "name", leaf);
   cJSON_AddStringToObject(reply, "path", rel);
   cJSON_AddStringToObject(reply, "kind", fc_script_kind_name(kind));
-  ret = fc_script_add_validation(reply, ctx, kind, rel, full,
+  ret = fc_script_add_validation(reply, ctx, kind, validation_mode,
+                                 rel, full,
                                  &validation_ret);
   cJSON_AddBoolToObject(reply, "ok", ret == 0 && validation_ret == 0);
   cJSON_AddBoolToObject(reply, "validated", validation_ret == 0);
@@ -1758,6 +1853,105 @@ static int cap_script_validate(const fc_tool_context_t *ctx,
     {
       ret = validation_ret;
       cJSON_AddStringToObject(reply, "error", "script validation failed");
+      cJSON_AddNumberToObject(reply, "code", ret);
+    }
+
+  printed = cJSON_PrintUnformatted(reply);
+  cJSON_Delete(reply);
+  if (printed == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  if (fc_strlcpy(out, printed, out_len) < 0)
+    {
+      ret = -ENOSPC;
+    }
+
+  cJSON_free(printed);
+  return ret;
+}
+
+static int cap_script_remove(const fc_tool_context_t *ctx,
+                             const char *args_json, char *out,
+                             size_t out_len)
+{
+  cJSON *root = cJSON_Parse(args_json ? args_json : "{}");
+  cJSON *reply;
+  const char *name;
+  const char *kind_arg;
+  char leaf[FC_SCRIPT_NAME_MAX + 4];
+  char rel[FC_PATH_LEN];
+  char full[FC_PATH_LEN];
+  fc_script_kind_t requested_kind;
+  fc_script_kind_t kind;
+  char *printed;
+  int guard_fd = -1;
+  int ret;
+
+  if (!fc_ctx_owner(ctx))
+    {
+      snprintf(out, out_len, "{\"ok\":false,\"error\":\"owner required\"}");
+      return -EACCES;
+    }
+
+  if (root == NULL)
+    {
+      return fc_json_out_error(out, out_len, "invalid JSON");
+    }
+
+  name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "name"));
+  if (name == NULL)
+    {
+      name = cJSON_GetStringValue(cJSON_GetObjectItem(root, "path"));
+    }
+
+  kind_arg = cJSON_GetStringValue(cJSON_GetObjectItem(root, "kind"));
+  ret = fc_script_kind_from_arg(kind_arg, &requested_kind);
+  if (ret == 0)
+    {
+      ret = fc_script_make_paths_kind(name, requested_kind, leaf,
+                                      sizeof(leaf), rel, sizeof(rel),
+                                      full, sizeof(full), &kind);
+    }
+
+  cJSON_Delete(root);
+  if (ret < 0)
+    {
+      snprintf(out, out_len, "{\"ok\":false,\"error\":\"script denied\"}");
+      return ret;
+    }
+
+  ret = fc_tool_guard_arm(ctx, FC_GUARD_STAGE_FILE, &guard_fd);
+  if (ret < 0)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"error\":\"script remove guard "
+               "unavailable\",\"code\":%d}", ret);
+      return ret;
+    }
+
+  ret = unlink(full);
+  if (ret < 0)
+    {
+      ret = -errno;
+    }
+
+  fc_guard_disarm(guard_fd);
+
+  reply = cJSON_CreateObject();
+  if (reply == NULL)
+    {
+      return -ENOMEM;
+    }
+
+  cJSON_AddBoolToObject(reply, "ok", ret == 0);
+  cJSON_AddStringToObject(reply, "name", leaf);
+  cJSON_AddStringToObject(reply, "path", rel);
+  cJSON_AddStringToObject(reply, "kind", fc_script_kind_name(kind));
+  if (ret < 0)
+    {
+      cJSON_AddStringToObject(reply, "error", "script remove failed");
       cJSON_AddNumberToObject(reply, "code", ret);
     }
 
@@ -2068,6 +2262,10 @@ static int cap_script_schedule(const fc_tool_context_t *ctx,
       ret = epoch > 0 ? fc_scheduler_add_once_ctx(id, epoch, prompt, ctx) :
                         -EINVAL;
     }
+  else if (strcmp(type, "boot") == 0)
+    {
+      ret = fc_scheduler_add_boot_ctx(id, prompt, ctx);
+    }
   else
     {
       ret = -EINVAL;
@@ -2317,6 +2515,20 @@ static int cap_scheduler_add(const fc_tool_context_t *ctx,
 
           ret = fc_scheduler_add_once_ctx(id, epoch, prompt, ctx);
         }
+    }
+  else if (strcmp(type, "boot") == 0)
+    {
+      ret = fc_tool_guard_arm(ctx, FC_GUARD_STAGE_SCHED, &guard_fd);
+      if (ret < 0)
+        {
+          cJSON_Delete(root);
+          snprintf(out, out_len,
+                   "{\"ok\":false,\"error\":\"scheduler guard "
+                   "unavailable\",\"code\":%d}", ret);
+          return ret;
+        }
+
+      ret = fc_scheduler_add_boot_ctx(id, prompt, ctx);
     }
 
   cJSON_Delete(root);
@@ -3685,8 +3897,7 @@ static const fc_cap_t g_caps[] =
   {
     "service.control", "Control service",
     "Start, stop, restart, enable, or disable Telnet/FTP services. Telnet "
-    "stop/restart reports unsupported on builds without a telnetd stop "
-    "command.",
+    "stop/restart uses the local telnetd PID file; FTP uses ftpd_stop.",
     "{\"type\":\"object\",\"properties\":{\"service\":{\"type\":\"string\","
     "\"enum\":[\"telnetd\",\"ftpd\"]},\"action\":{\"type\":\"string\","
     "\"enum\":[\"start\",\"stop\",\"restart\",\"enable\",\"disable\"]}},"
@@ -3761,24 +3972,39 @@ static const fc_cap_t g_caps[] =
     "script.write", "Write generated script",
     "Create or replace a generated Berry .be or NSH .nsh script under "
     "scripts/generated/. By default the script is validated by running it "
-    "once through the guarded runner.",
+    "once through the guarded runner; use validate_mode=syntax for "
+    "long-running Berry UI scripts.",
     "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
     "\"path\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},"
     "\"kind\":{\"type\":\"string\",\"enum\":[\"auto\",\"berry\",\"be\","
     "\"shell\",\"nsh\",\"sh\"]},\"text\":{\"type\":\"string\"},"
-    "\"validate\":{\"type\":\"boolean\"}},"
+    "\"validate\":{\"type\":\"boolean\"},\"validate_mode\":{\"type\":"
+    "\"string\",\"enum\":[\"run\",\"syntax\"]}},"
     "\"required\":[\"text\"],\"additionalProperties\":false}",
     true, true, cap_script_write
   },
   {
     "script.validate", "Validate generated script",
-    "Run a generated Berry or NSH script once through the guarded runner "
-    "and return the validation result.",
+    "Validate a generated Berry or NSH script. Default mode runs it once "
+    "through the guarded runner; mode=syntax checks Berry syntax without "
+    "executing the script.",
+    "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
+    "\"path\":{\"type\":\"string\"},\"kind\":{\"type\":\"string\","
+    "\"enum\":[\"auto\",\"berry\",\"be\",\"shell\",\"nsh\",\"sh\"]},"
+    "\"mode\":{\"type\":\"string\",\"enum\":[\"run\",\"syntax\"]},"
+    "\"validate_mode\":{\"type\":\"string\",\"enum\":[\"run\",\"syntax\"]}},"
+    "\"additionalProperties\":false}",
+    true, true, cap_script_validate
+  },
+  {
+    "script.remove", "Remove generated script",
+    "Remove a generated Berry or NSH script from scripts/generated/ after "
+    "the owner confirms it is no longer wanted.",
     "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},"
     "\"path\":{\"type\":\"string\"},\"kind\":{\"type\":\"string\","
     "\"enum\":[\"auto\",\"berry\",\"be\",\"shell\",\"nsh\",\"sh\"]}},"
     "\"additionalProperties\":false}",
-    true, true, cap_script_validate
+    true, true, cap_script_remove
   },
   {
     "script.run", "Run generated script",
@@ -3792,14 +4018,15 @@ static const fc_cap_t g_caps[] =
   },
   {
     "script.schedule", "Schedule generated script",
-    "Schedule a generated Berry or NSH script to run once, on an interval, "
-    "or from a 5-field cron expression. The scheduler fires script.run "
-    "directly without needing the LLM.",
+    "Schedule a generated Berry or NSH script to run at boot, once, on an "
+    "interval, or from a 5-field cron expression. The scheduler fires "
+    "script.run directly without needing the LLM.",
     "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},"
     "\"name\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},"
     "\"kind\":{\"type\":\"string\",\"enum\":[\"auto\",\"berry\",\"be\","
     "\"shell\",\"nsh\",\"sh\"]},"
-    "\"type\":{\"type\":\"string\",\"enum\":[\"interval\",\"once\",\"cron\"]},"
+    "\"type\":{\"type\":\"string\",\"enum\":[\"interval\",\"once\",\"cron\","
+    "\"boot\"]},"
     "\"every_sec\":{\"type\":\"integer\"},\"at_epoch\":{\"type\":\"integer\"},"
     "\"after_sec\":{\"type\":\"integer\"},\"expr\":{\"type\":\"string\"},"
     "\"args_json\":{\"type\":\"string\"}},"
@@ -3817,11 +4044,12 @@ static const fc_cap_t g_caps[] =
   },
   {
     "scheduler.add", "Add schedule",
-    "Add an interval, once, or cron schedule. Schedules inherit the current "
-    "owner chat and session. Plain prompts are delivered directly at fire "
-    "time; prefix prompt with agent: to run the full LLM/tool loop.",
+    "Add a boot, interval, once, or cron schedule. Schedules inherit the "
+    "current owner chat and session. Plain prompts are delivered directly at "
+    "fire time; prefix prompt with agent: to run the full LLM/tool loop.",
     "{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},"
-    "\"type\":{\"type\":\"string\",\"enum\":[\"interval\",\"once\",\"cron\"]},"
+    "\"type\":{\"type\":\"string\",\"enum\":[\"interval\",\"once\",\"cron\","
+    "\"boot\"]},"
     "\"every_sec\":{\"type\":\"integer\"},\"at_epoch\":{\"type\":\"integer\"},"
     "\"after_sec\":{\"type\":\"integer\"},"
     "\"expr\":{\"type\":\"string\"},\"prompt\":{\"type\":\"string\"}},"

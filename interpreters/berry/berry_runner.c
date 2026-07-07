@@ -228,6 +228,52 @@ static int berry_claw_neopixels_set(bvm *vm)
   be_return(vm);
 }
 
+static int berry_claw_neopixels_off(bvm *vm)
+{
+  char result[BERRY_CLAW_TOOL_MAX];
+
+  berry_claw_call_tool("neopixels.off", "{}", result, sizeof(result));
+  be_pushstring(vm, result);
+  be_return(vm);
+}
+
+static int berry_claw_neopixels_effect(bvm *vm)
+{
+  const char *effect = be_top(vm) >= 1 ? be_tostring(vm, 1) : "rainbow";
+  const char *color = be_top(vm) >= 2 ? be_tostring(vm, 2) : "";
+  char effect_esc[128];
+  char color_esc[128];
+  char args[320];
+  char result[BERRY_CLAW_TOOL_MAX];
+
+  if (effect[0] == '{')
+    {
+      berry_claw_call_tool("neopixels.effect", effect, result,
+                           sizeof(result));
+    }
+  else
+    {
+      berry_claw_json_escape(effect, effect_esc, sizeof(effect_esc));
+      berry_claw_json_escape(color, color_esc, sizeof(color_esc));
+      if (color_esc[0] != '\0')
+        {
+          snprintf(args, sizeof(args),
+                   "{\"effect\":\"%s\",\"color\":\"%s\"}",
+                   effect_esc, color_esc);
+        }
+      else
+        {
+          snprintf(args, sizeof(args), "{\"effect\":\"%s\"}", effect_esc);
+        }
+
+      berry_claw_call_tool("neopixels.effect", args, result,
+                           sizeof(result));
+    }
+
+  be_pushstring(vm, result);
+  be_return(vm);
+}
+
 static int berry_claw_schedule_add(bvm *vm)
 {
   const char *args_json = be_top(vm) >= 1 ? be_tostring(vm, 1) : "{}";
@@ -236,6 +282,62 @@ static int berry_claw_schedule_add(bvm *vm)
   berry_claw_call_tool("scheduler.add", args_json, result, sizeof(result));
   be_pushstring(vm, result);
   be_return(vm);
+}
+
+static int berry_claw_script_run(bvm *vm)
+{
+  const char *args_json = be_top(vm) >= 1 ? be_tostring(vm, 1) : "{}";
+  char result[BERRY_CLAW_TOOL_MAX];
+
+  berry_claw_call_tool("script.run", args_json, result, sizeof(result));
+  be_pushstring(vm, result);
+  be_return(vm);
+}
+
+static int berry_claw_rtttl_play(bvm *vm)
+{
+  const char *arg = be_top(vm) >= 1 ? be_tostring(vm, 1) : "";
+  char esc[768];
+  char args[900];
+  char result[BERRY_CLAW_TOOL_MAX];
+
+  if (arg[0] == '{')
+    {
+      berry_claw_call_tool("rtttl.play", arg, result, sizeof(result));
+    }
+  else
+    {
+      berry_claw_json_escape(arg, esc, sizeof(esc));
+      snprintf(args, sizeof(args), "{\"name\":\"%s\"}", esc);
+      berry_claw_call_tool("rtttl.play", args, result, sizeof(result));
+    }
+
+  be_pushstring(vm, result);
+  be_return(vm);
+}
+
+static int berry_claw_service_control(bvm *vm)
+{
+  const char *service = be_top(vm) >= 1 ? be_tostring(vm, 1) : "";
+  const char *action = be_top(vm) >= 2 ? be_tostring(vm, 2) : "status";
+  char service_esc[64];
+  char action_esc[64];
+  char args[180];
+  char result[BERRY_CLAW_TOOL_MAX];
+
+  berry_claw_json_escape(service, service_esc, sizeof(service_esc));
+  berry_claw_json_escape(action, action_esc, sizeof(action_esc));
+  snprintf(args, sizeof(args),
+           "{\"service\":\"%s\",\"action\":\"%s\"}",
+           service_esc, action_esc);
+  berry_claw_call_tool("service.control", args, result, sizeof(result));
+  be_pushstring(vm, result);
+  be_return(vm);
+}
+
+static int berry_claw_telegram_send(bvm *vm)
+{
+  return berry_claw_call_text_tool(vm, "telegram.send_message", "text");
 }
 
 static void berry_claw_set_func(bvm *vm, const char *name, bntvfunc fn)
@@ -257,7 +359,13 @@ static void berry_claw_register(bvm *vm)
   berry_claw_set_func(vm, "memory_append", berry_claw_memory_append);
   berry_claw_set_func(vm, "terminal_run", berry_claw_terminal_run);
   berry_claw_set_func(vm, "neopixels_set", berry_claw_neopixels_set);
+  berry_claw_set_func(vm, "neopixels_off", berry_claw_neopixels_off);
+  berry_claw_set_func(vm, "neopixels_effect", berry_claw_neopixels_effect);
   berry_claw_set_func(vm, "schedule_add", berry_claw_schedule_add);
+  berry_claw_set_func(vm, "script_run", berry_claw_script_run);
+  berry_claw_set_func(vm, "rtttl_play", berry_claw_rtttl_play);
+  berry_claw_set_func(vm, "service_control", berry_claw_service_control);
+  berry_claw_set_func(vm, "telegram_send", berry_claw_telegram_send);
   be_cache_module(vm, be_newstr(vm, "claw"));
   BERRY_CLAW_TRACE("set global");
   be_setglobal(vm, "claw");
@@ -400,5 +508,69 @@ int berry_run_file_with_claw(const char *path, const char *args_json,
   g_state = NULL;
   pthread_mutex_unlock(&g_runner_lock);
   BERRY_CLAW_TRACE("done ret=%d", ret);
+  return ret;
+}
+
+int berry_check_file(const char *path, char *out, size_t out_len)
+{
+  bvm *vm;
+  char *source;
+  char esc[BERRY_CLAW_REPLY_MAX * 6 + 1];
+  int res;
+  int ret = 0;
+
+  if (path == NULL || out == NULL || out_len == 0)
+    {
+      return -EINVAL;
+    }
+
+  pthread_mutex_lock(&g_runner_lock);
+  source = malloc(BERRY_CLAW_SOURCE_MAX);
+  if (source == NULL)
+    {
+      pthread_mutex_unlock(&g_runner_lock);
+      return -ENOMEM;
+    }
+
+  res = berry_claw_read_source(path, source, BERRY_CLAW_SOURCE_MAX);
+  if (res < 0)
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"mode\":\"syntax\","
+               "\"error\":\"script read failed\",\"code\":%d}", res);
+      free(source);
+      pthread_mutex_unlock(&g_runner_lock);
+      return res;
+    }
+
+  vm = be_vm_new();
+  if (vm == NULL)
+    {
+      free(source);
+      pthread_mutex_unlock(&g_runner_lock);
+      return -ENOMEM;
+    }
+
+  res = be_loadstring(vm, source);
+  free(source);
+  if (res == BE_OK)
+    {
+      snprintf(out, out_len, "{\"ok\":true,\"mode\":\"syntax\"}");
+    }
+  else
+    {
+      const char *msg = be_top(vm) > 0 ? be_tostring(vm, -1) :
+                        "Berry syntax error";
+
+      berry_claw_json_escape(msg ? msg : "Berry syntax error",
+                             esc, sizeof(esc));
+      snprintf(out, out_len,
+               "{\"ok\":false,\"mode\":\"syntax\","
+               "\"error\":\"%s\",\"code\":%d}", esc, res);
+      ret = -EIO;
+    }
+
+  be_vm_delete(vm);
+  pthread_mutex_unlock(&g_runner_lock);
   return ret;
 }

@@ -468,6 +468,7 @@ int fc_selftest_main(void)
   fc_scheduler_remove("selftest-job");
   fc_scheduler_remove("selftest-once");
   fc_scheduler_remove("selftest-after");
+  fc_scheduler_remove("selftest-boot");
   buf[0] = '\0';
   ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.add",
                "{\"id\":\"selftest-job\",\"type\":\"interval\","
@@ -513,11 +514,69 @@ int fc_selftest_main(void)
   ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.remove",
                "{\"id\":\"selftest-after\"}", buf, sizeof(buf)) == 0,
                "scheduler remove after");
+  buf[0] = '\0';
+  ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.add",
+               "{\"id\":\"selftest-boot\",\"type\":\"boot\","
+               "\"prompt\":\"selftest boot\"}",
+               buf, sizeof(buf)) == 0 &&
+               strstr(buf, "\"id\":\"selftest-boot\"") != NULL,
+               "scheduler add boot");
+  buf[0] = '\0';
+  ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.list", "{}",
+                                  buf, sizeof(buf)) == 0 &&
+               strstr(buf, "selftest-boot") != NULL &&
+               strstr(buf, "boot") != NULL,
+               "scheduler list boot");
+  buf[0] = '\0';
+  ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.remove",
+               "{\"id\":\"selftest-boot\"}", buf, sizeof(buf)) == 0,
+               "scheduler remove boot");
   status[0] = '\0';
   ret |= check(fc_scheduler_status_format(status, sizeof(status)) == 0 &&
                strstr(status, "scheduler_status:") != NULL &&
                strstr(status, "used=") != NULL,
                "scheduler status");
+
+  {
+    char session_path[FC_PATH_LEN] = "";
+
+    if (fc_data_path("sessions/selftest-scheduled-tool.jsonl",
+                     session_path, sizeof(session_path)) == 0)
+      {
+        unlink(session_path);
+      }
+
+    memset(&ev, 0, sizeof(ev));
+    fc_strlcpy(ev.source, "scheduler", sizeof(ev.source));
+    fc_strlcpy(ev.type, "timer.fire", sizeof(ev.type));
+    fc_strlcpy(ev.channel, "telegram", sizeof(ev.channel));
+    fc_strlcpy(ev.chat_id, "6216681418", sizeof(ev.chat_id));
+    fc_strlcpy(ev.session_id, "selftest-scheduled-tool",
+               sizeof(ev.session_id));
+    fc_strlcpy(ev.text, "tool:self.owner_fake {\"from\":\"schedule\"}",
+               sizeof(ev.text));
+    ev.owner_mode = true;
+    g_fake_called = 0;
+    memset(&g_fake_last_ctx, 0, sizeof(g_fake_last_ctx));
+    buf[0] = '\0';
+    ret |= check(fc_agent_handle_event(&ev, buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "Scheduled tool self.owner_fake -> ok") !=
+                 NULL &&
+                 g_fake_called == 1 &&
+                 g_fake_last_ctx.owner_mode &&
+                 strcmp(g_fake_last_ctx.source, "scheduler") == 0 &&
+                 strcmp(g_fake_last_ctx.channel, "telegram") == 0 &&
+                 strcmp(g_fake_last_ctx.chat_id, "6216681418") == 0 &&
+                 strcmp(g_fake_last_ctx.session_id,
+                        "selftest-scheduled-tool") == 0,
+                 "scheduler direct owner tool");
+
+    if (session_path[0] != '\0')
+      {
+        unlink(session_path);
+      }
+  }
+
   status[0] = '\0';
   ret |= check(fc_berry_status_format(status, sizeof(status)) == 0 &&
                strstr(status, "berry_status:") != NULL &&
@@ -551,6 +610,7 @@ int fc_selftest_main(void)
   {
     char script_path[FC_PATH_LEN] = "";
 
+    fc_scheduler_remove("selftest-script-boot");
     if (fc_data_path("scripts/generated/selftest_shell.nsh",
                      script_path, sizeof(script_path)) == 0)
       {
@@ -578,6 +638,29 @@ int fc_selftest_main(void)
                  buf, sizeof(buf)) == 0 &&
                  strstr(buf, "selftest_shell.nsh") != NULL,
                  "script list shell");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.schedule",
+                 "{\"name\":\"selftest_shell\",\"kind\":\"shell\","
+                 "\"type\":\"boot\",\"id\":\"selftest-script-boot\"}",
+                 buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"id\":\"selftest-script-boot\"") != NULL &&
+                 strstr(buf, "\"type\":\"boot\"") != NULL,
+                 "script schedule boot");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "scheduler.remove",
+                 "{\"id\":\"selftest-script-boot\"}", buf, sizeof(buf)) == 0,
+                 "script schedule boot remove");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.remove",
+                 "{\"name\":\"selftest_shell\",\"kind\":\"shell\"}",
+                 buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"selftest_shell.nsh\"") != NULL,
+                 "script remove shell");
+    if (script_path[0] != '\0')
+      {
+        ret |= check(access(script_path, F_OK) < 0,
+                     "script remove deleted file");
+      }
 
     if (script_path[0] != '\0')
       {
@@ -587,6 +670,47 @@ int fc_selftest_main(void)
 
 #if defined(CONFIG_FRUITCLAW_ENABLE_BERRY) && \
     defined(CONFIG_FRUITCLAW_BERRY_EXPERIMENTAL_RUNNER)
+  {
+    char lvgl_script_path[FC_PATH_LEN] = "";
+
+    if (fc_data_path("scripts/generated/selftest_lvgl_ui.be",
+                     lvgl_script_path, sizeof(lvgl_script_path)) == 0)
+      {
+        unlink(lvgl_script_path);
+      }
+
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.write",
+                 "{\"name\":\"selftest_lvgl_ui\",\"kind\":\"berry\","
+                 "\"text\":\"import lv\\n"
+                 "lv.start()\\n"
+                 "scr = lv.scr_act()\\n"
+                 "label = lv.label(scr)\\n"
+                 "label.set_text(\\\"selftest\\\")\\n\","
+                 "\"validate_mode\":\"syntax\"}",
+                 buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"validation_mode\":\"syntax\"") != NULL &&
+                 strstr(buf, "\"validated\":true") != NULL,
+                 "berry lvgl syntax script write");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.validate",
+                 "{\"name\":\"selftest_lvgl_ui\",\"kind\":\"berry\","
+                 "\"mode\":\"syntax\"}",
+                 buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"mode\":\"syntax\"") != NULL,
+                 "berry lvgl syntax validate");
+    buf[0] = '\0';
+    ret |= check(fc_cap_execute_ctx(&tool_ctx, "script.remove",
+                 "{\"name\":\"selftest_lvgl_ui\",\"kind\":\"berry\"}",
+                 buf, sizeof(buf)) == 0,
+                 "berry lvgl syntax remove");
+
+    if (lvgl_script_path[0] != '\0')
+      {
+        unlink(lvgl_script_path);
+      }
+  }
+
   buf[0] = '\0';
   ret |= check(fc_cap_execute_ctx(&tool_ctx, "file.write_limited",
                "{\"path\":\"scripts/selftest_import_claw.be\","

@@ -23,7 +23,7 @@ Useful subcommands:
 | `fruitclaw config set-secret telegram` | Store the Telegram bot token without printing it. |
 | `fruitclaw config set-secret deepseek` | Store the DeepSeek API key without printing it. |
 | `fruitclaw tools` | List registered capability tools. |
-| `fruitclaw selftest` | Run offline sanity tests for JSON, tools, queues, cron, memory, paths, and mapping logic. |
+| `fruitclaw selftest` | Run offline sanity tests for JSON, tools, queues, cron, memory, paths, scheduled direct tools, boot schedules, and mapping logic. |
 | `fruitclaw telegram-test` | Send a test Telegram message to the allowed chat. |
 | `fruitclaw deepseek-test` | Test outbound DeepSeek chat/completions. |
 | `fruitclaw terminal-run <cmd...>` | Run a bounded NSH command and capture output. |
@@ -31,7 +31,7 @@ Useful subcommands:
 | `fruitclaw service <start|stop|restart|enable|disable> <service>` | Manage Telnet/FTP where the underlying daemon supports the action. |
 | `fruitclaw berry-run <path> [json-args]` | Run a Berry script below `scripts/`. |
 | `fruitclaw berry-smoke` | Verify the real Berry runner and `claw` binding. |
-| `fruitclaw schedule ...` | Add/list/remove interval, once, after, and cron schedules. |
+| `fruitclaw schedule ...` | Add/list/remove boot, interval, once, after, and cron schedules. |
 | `fruitclaw neopixels ...` | Drive `/dev/leds0`. |
 | `fruitclaw device ...` | List/read/write bounded `/dev` paths. |
 | `fruitclaw mcp status` | Show MCP endpoint counters. |
