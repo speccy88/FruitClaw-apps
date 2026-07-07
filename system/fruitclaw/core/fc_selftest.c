@@ -49,6 +49,26 @@ static int check(bool expr, const char *name)
   return 0;
 }
 
+static int restore_disabled_marker(const char *path, bool existed)
+{
+  if (path == NULL || path[0] == '\0')
+    {
+      return 0;
+    }
+
+  if (existed)
+    {
+      return fc_write_text_file_atomic(path, "disabled\n");
+    }
+
+  if (unlink(path) < 0 && errno != ENOENT)
+    {
+      return -errno;
+    }
+
+  return 0;
+}
+
 #ifdef CONFIG_FRUITCLAW_MCP_SERVER
 static int json_key_count(const char *json, const char *key)
 {
@@ -198,6 +218,97 @@ int fc_selftest_main(void)
   ret |= check(fc_cap_execute_ctx(&tool_ctx, "self.owner_fake", "{}",
                                   buf, sizeof(buf)) == 0,
                "owner policy allow");
+
+  buf[0] = '\0';
+  ret |= check(fc_service_control("all", "status", buf, sizeof(buf)) == 0 &&
+               strstr(buf, "\"telnetd\"") != NULL &&
+               strstr(buf, "\"ftpd\"") != NULL,
+               "service status all");
+  buf[0] = '\0';
+  ret |= check(fc_service_control("not-a-service", "status",
+                                  buf, sizeof(buf)) < 0 &&
+               strstr(buf, "unknown service") != NULL,
+               "service status unknown");
+  buf[0] = '\0';
+  ret |= check(fc_service_control("all", "restart", buf, sizeof(buf)) < 0 &&
+               strstr(buf, "service required") != NULL,
+               "service all action rejected");
+  buf[0] = '\0';
+  ret |= check(fc_cap_execute_ctx(&tool_ctx, "service.control",
+                                  "{\"service\":\"telnetd\"}",
+                                  buf, sizeof(buf)) < 0 &&
+               strstr(buf, "missing service or action") != NULL,
+               "service control missing action");
+
+#ifdef CONFIG_SYSTEM_TELNETD
+  {
+    bool marker_existed = false;
+    bool marker_ok;
+
+    marker_ok = fc_data_path("services/telnetd.disabled",
+                             path, sizeof(path)) == 0;
+    if (marker_ok)
+      {
+        marker_existed = access(path, F_OK) == 0;
+      }
+
+    buf[0] = '\0';
+    ret |= check(fc_service_control("telnetd", "status",
+                                    buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"service\":\"telnetd\"") != NULL,
+                 "service status telnetd");
+    buf[0] = '\0';
+    ret |= check(fc_service_control("telnetd", "disable",
+                                    buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"enabled\":false") != NULL &&
+                 (!marker_ok || access(path, F_OK) == 0),
+                 "service disable telnetd marker");
+    buf[0] = '\0';
+    ret |= check(fc_service_control("telnetd", "enable",
+                                    buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"enabled\":true") != NULL &&
+                 (!marker_ok || access(path, F_OK) < 0),
+                 "service enable telnetd marker");
+    ret |= check(restore_disabled_marker(marker_ok ? path : "",
+                                         marker_existed) == 0,
+                 "service restore telnetd marker");
+  }
+#endif
+
+#if defined(CONFIG_EXAMPLES_FTPD) && defined(CONFIG_NETUTILS_FTPD)
+  {
+    bool marker_existed = false;
+    bool marker_ok;
+
+    marker_ok = fc_data_path("services/ftpd.disabled",
+                             path, sizeof(path)) == 0;
+    if (marker_ok)
+      {
+        marker_existed = access(path, F_OK) == 0;
+      }
+
+    buf[0] = '\0';
+    ret |= check(fc_service_control("ftpd", "status",
+                                    buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"service\":\"ftpd\"") != NULL,
+                 "service status ftpd");
+    buf[0] = '\0';
+    ret |= check(fc_service_control("ftpd", "disable",
+                                    buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"enabled\":false") != NULL &&
+                 (!marker_ok || access(path, F_OK) == 0),
+                 "service disable ftpd marker");
+    buf[0] = '\0';
+    ret |= check(fc_service_control("ftpd", "enable",
+                                    buf, sizeof(buf)) == 0 &&
+                 strstr(buf, "\"enabled\":true") != NULL &&
+                 (!marker_ok || access(path, F_OK) < 0),
+                 "service enable ftpd marker");
+    ret |= check(restore_disabled_marker(marker_ok ? path : "",
+                                         marker_existed) == 0,
+                 "service restore ftpd marker");
+  }
+#endif
 
 #ifdef CONFIG_FRUITCLAW_MCP_SERVER
   fc_mcp_clear_status();

@@ -3222,6 +3222,70 @@ int fc_services_status_json(char *out, size_t out_len)
   return 0;
 }
 
+static int fc_service_status_id_json(enum fc_service_id_e id,
+                                     char *out, size_t out_len)
+{
+  unsigned long attempts;
+  unsigned long restarts;
+  bool started;
+  bool listening;
+  int last_ret;
+  int probe_ret;
+  int64_t last_ms;
+  int64_t now;
+
+  if (out == NULL || out_len == 0)
+    {
+      return -EINVAL;
+    }
+
+  now = fc_mono_ms();
+
+  pthread_mutex_lock(&g_services_lock);
+  if (id == FC_SERVICE_TELNETD)
+    {
+      attempts = g_telnetd_attempts;
+      restarts = g_telnetd_restarts;
+      started = g_telnetd_started;
+      listening = g_telnetd_listening;
+      last_ret = g_telnetd_last_ret;
+      probe_ret = g_telnetd_probe_ret;
+      last_ms = g_telnetd_last_ms;
+    }
+  else
+    {
+      attempts = g_ftpd_attempts;
+      restarts = g_ftpd_restarts;
+      started = g_ftpd_started;
+      listening = g_ftpd_listening;
+      last_ret = g_ftpd_last_ret;
+      probe_ret = g_ftpd_probe_ret;
+      last_ms = g_ftpd_last_ms;
+    }
+
+  pthread_mutex_unlock(&g_services_lock);
+
+  snprintf(out, out_len,
+           "{\"ok\":true,\"service\":\"%s\",\"compiled\":%s,"
+           "\"boot_default\":%s,\"enabled\":%s,\"autostart\":%s,"
+           "\"started\":%s,\"listening\":%s,\"start_supported\":%s,"
+           "\"stop_supported\":%s,\"attempts\":%lu,\"restarts\":%lu,"
+           "\"last_ret\":%d,\"probe_ret\":%d,\"last_age_ms\":%lld}",
+           fc_service_name(id),
+           fc_service_compiled(id) ? "true" : "false",
+           fc_service_boot_default(id) ? "true" : "false",
+           fc_service_runtime_enabled(id) ? "true" : "false",
+           fc_service_autostart_enabled(id) ? "true" : "false",
+           started ? "true" : "false",
+           listening ? "true" : "false",
+           fc_service_compiled(id) ? "true" : "false",
+           fc_service_stop_supported(id) ? "true" : "false",
+           attempts, restarts, last_ret, probe_ret,
+           last_ms > 0 ? (long long)(now - last_ms) : -1);
+
+  return 0;
+}
+
 int fc_service_control(const char *service_name, const char *action,
                        char *out, size_t out_len)
 {
@@ -3239,10 +3303,33 @@ int fc_service_control(const char *service_name, const char *action,
   service = service_name != NULL ? service_name : "all";
   verb = action != NULL ? action : "status";
 
-  if (strcmp(verb, "status") == 0 ||
-      strcmp(service, "all") == 0 || service[0] == '\0')
+  if (strcmp(verb, "status") == 0)
     {
-      return fc_services_status_json(out, out_len);
+      if (strcmp(service, "all") == 0 || service[0] == '\0')
+        {
+          return fc_services_status_json(out, out_len);
+        }
+
+      ret = fc_service_resolve(service, &id);
+      if (ret < 0)
+        {
+          snprintf(out, out_len,
+                   "{\"ok\":false,\"service\":\"%s\",\"action\":\"%s\","
+                   "\"error\":\"unknown service\",\"code\":%d}",
+                   service, verb, ret);
+          return ret;
+        }
+
+      return fc_service_status_id_json(id, out, out_len);
+    }
+
+  if (strcmp(service, "all") == 0 || service[0] == '\0')
+    {
+      snprintf(out, out_len,
+               "{\"ok\":false,\"service\":\"%s\",\"action\":\"%s\","
+               "\"error\":\"service required\",\"code\":%d}",
+               service, verb, -EINVAL);
+      return -EINVAL;
     }
 
   ret = fc_service_resolve(service, &id);
